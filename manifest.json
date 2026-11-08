@@ -19,7 +19,7 @@
     "description": "One airborne aircraft near your locally configured home, refreshed every ten seconds while enabled.",
     "category": "Information",
     "allowMultiple": false,
-    "defaultSection": "centerBegin",
+    "defaultSection": "right",
     "defaults": {
       "demoMode": false,
       "rangeMiles": 70
