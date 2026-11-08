@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+python3 -B "$ROOT/tests/test_nearest.py"
+node "$ROOT/tests/test_ui.js"
+omarchy plugin validate "$ROOT"

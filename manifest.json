@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "shaggyrs6.nearest-aircraft",
+  "name": "Nearest Aircraft",
+  "version": "0.1.2",
+  "author": "Lee",
+  "license": "MIT",
+  "description": "Nearest reported airborne aircraft: flight or tail number, altitude and tracking links. Home is configured locally.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Nearest Aircraft",
+    "description": "One airborne aircraft near your locally configured home, refreshed every ten seconds while enabled.",
+    "category": "Information",
+    "allowMultiple": false,
+    "defaultSection": "centerBegin",
+    "defaults": {
+      "demoMode": false,
+      "rangeMiles": 70
+    },
+    "schema": [
+      {
+        "key": "rangeMiles",
+        "type": "integer",
+        "label": "Search range (miles)",
+        "description": "Maximum horizontal distance from your saved home. Both civil and military aircraft remain eligible.",
+        "min": 1,
+        "max": 100,
+        "step": 1,
+        "defaultValue": 70
+      },
+      {
+        "key": "demoMode",
+        "type": "boolean",
+        "label": "Demonstration mode",
+        "description": "Synthetic aircraft; no feed requests. Turn off to use your locally saved home.",
+        "defaultValue": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+PREVIEW="$(mktemp -d /tmp/nearest-aircraft-gui-test-XXXXXX)"
+for module in Commons Ui services; do
+  ln -s "/usr/share/omarchy/shell/$module" "$PREVIEW/$module"
+done
+ln -s "$ROOT" "$PREVIEW/Aircraft"
+cp "$ROOT/tests/gui.qml" "$PREVIEW/shell.qml"
+# The isolated synthetic test never reads home state or polls the feed.
+qs --path "$PREVIEW/shell.qml" > "$PREVIEW/result.log" 2>&1
+cat "$PREVIEW/result.log"
+rg -q 'REGRESSION PASS:' "$PREVIEW/result.log"
+printf 'Qt interaction test passed. Private temporary evidence: %s\n' "$PREVIEW"
