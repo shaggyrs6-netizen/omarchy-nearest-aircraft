@@ -46,6 +46,7 @@
   "range.label": "Search range",
   "range.apply": "Apply",
   "range.hint": "1–100 miles from your saved location. Also available in widget settings.",
+  "range.saveError": "Could not save the range. Try again or check Omarchy widget settings.",
   "range.error": "Enter a whole number from 1 to 100 miles.",
   "links.fr24": "Open Flightradar24 ↗",
   "links.adsbx": "Open ADS-B Exchange ↗"

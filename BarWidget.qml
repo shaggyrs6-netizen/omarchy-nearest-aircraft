@@ -81,9 +81,9 @@ BarWidget {
     readonly property bool popoutSwitchClosing: false
     function setRange(value) {
         if (!Safe.number(value) || value !== Math.floor(value) || value<1 || value>100 || !root.bar || !root.bar.shell) return false
+        if (root.settings && root.settings.rangeMiles === value) return true
         var next = Object.assign({}, root.settings, {rangeMiles:value})
-        root.bar.shell.updateEntryInline(root.moduleName,next)
-        return true
+        return root.bar.shell.updateEntryInline(root.moduleName, next) === true
     }
     function open() { panel.controller.show() }
     function close() { panel.controller.hide() }

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "shaggyrs6.nearest-aircraft",
   "name": "Nearest Aircraft",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": "Lee",
   "license": "MIT",
   "description": "Nearest reported airborne aircraft: flight or tail number, altitude and tracking links. Home is configured locally.",

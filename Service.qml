@@ -5,7 +5,7 @@ import "UiSafe.js" as Safe
 
 Item {
     id: root
-    property var settings: ({})
+    property var settings: null
     // Test harnesses can use a separate private directory. Normal settings do
     // not contain home coordinates or alter the helper's fixed HTTPS source.
     property string stateDirectory: ""
@@ -13,8 +13,15 @@ Item {
     readonly property int rangeMiles: Safe.rangeMiles(settings ? settings.rangeMiles : undefined)
     property bool intentionalRestart: false
     property bool ready: false
-    Component.onCompleted: root.ready = true
-    readonly property bool demo: settings && settings.demoMode === true
+    Component.onCompleted: {
+        root.ready = true
+        if (root.settings !== null) root.restartReader()
+    }
+    onSettingsChanged: {
+        if (root.ready && root.settings !== null && !reader.running && !restartTimer.running)
+            root.restartReader()
+    }
+    readonly property bool demo: settings !== null && settings.demoMode === true
     readonly property var extraArguments: stateDirectory ? ["--state-dir", stateDirectory] : []
     property var data: ({state:"loading", configured:false, nearest:null})
     property double now: Date.now() / 1000
@@ -56,7 +63,7 @@ Item {
         return Qt.openUrlExternally(url)
     }
     function restartReader() {
-        if (root.shuttingDown || !root.ready) return
+        if (root.shuttingDown || !root.ready || root.settings === null) return
         root.data = {state:"loading", configured:root.data.configured === true, nearest:null}
         root.crashCount = 0
         if (reader.running) { root.intentionalRestart = true; reader.running = false }
@@ -67,12 +74,12 @@ Item {
     Component.onDestruction: { root.shuttingDown = true; reader.running = false; controller.running = false }
 
     Timer { interval:1000; repeat:true; running:true; onTriggered:root.now = Date.now()/1000 }
-    Timer { id:restartTimer; interval:1000; onTriggered:if (!root.shuttingDown && !reader.running && root.crashCount<3) reader.running=true }
+    Timer { id:restartTimer; interval:1000; onTriggered:if (!root.shuttingDown && root.settings !== null && !reader.running && root.crashCount<3) reader.running=true }
     Timer { id:controlDeadline; interval:5000; onTriggered:if (controller.running) controller.running=false }
     Process {
         id: reader
         command: ["python3", "-B", root.helper, "worker", "--range-miles", String(root.rangeMiles)].concat(root.extraArguments).concat(root.demo ? ["--demo"] : [])
-        running: true
+        running: false
         stdout: SplitParser { splitMarker:"\n"; onRead:function(line) { root.apply(line) } }
         onExited: function(code, status) {
             if (root.shuttingDown) return

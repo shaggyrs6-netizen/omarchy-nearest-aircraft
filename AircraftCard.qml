@@ -13,7 +13,9 @@ ColumnLayout {
     property bool editHome: false
     property bool inputError: false
     property var changeRange: null
-    property bool rangeError: false
+    property string rangeError: ""
+    readonly property string savedRangeText: svc ? String(svc.rangeMiles) : ""
+    onSavedRangeTextChanged: if (rangeInput && !rangeInput.activeFocus) rangeInput.text = savedRangeText
     readonly property bool inputFocused: latitude.activeFocus || longitude.activeFocus || rangeInput.activeFocus
     readonly property bool configured: svc && svc.data.configured === true
     readonly property bool fresh: svc && svc.fresh
@@ -24,7 +26,23 @@ ColumnLayout {
     LayoutMirroring.enabled: I18n.rightToLeft
     LayoutMirroring.childrenInherit: true
     Translations { id:strings; directory:Qt.resolvedUrl("i18n") }
-    onPanelOpenChanged: if(!panelOpen) { latitude.text=""; longitude.text=""; root.editHome=false; root.inputError=false; root.rangeError=false; rangeInput.text=String(svc ? svc.rangeMiles : 70) }
+    onPanelOpenChanged: {
+        rangeError = ""
+        rangeInput.text = savedRangeText
+        if (!panelOpen) {
+            latitude.text = ""
+            longitude.text = ""
+            editHome = false
+            inputError = false
+        }
+    }
+    function applyRange() {
+        var value = Number(rangeInput.text)
+        if (!Safe.number(value) || Math.floor(value) !== value || value < 1 || value > 100)
+            rangeError = "range.error"
+        else
+            rangeError = changeRange(value) ? "" : "range.saveError"
+    }
     Connections {
         target: root.svc
         function onControlFinished(success) {
@@ -64,11 +82,11 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth:true
         PlainText { text:strings.t("range.label") }
-        Ui.TextField { id:rangeInput; objectName:"rangeInput"; Layout.fillWidth:true; text:String(svc ? svc.rangeMiles : 70); maximumLength:3; selectByMouse:true }
+        Ui.TextField { id:rangeInput; objectName:"rangeInput"; Layout.fillWidth:true; text:root.savedRangeText; onTextEdited:root.rangeError=""; maximumLength:3; selectByMouse:true }
         PlainText { text:"mi" }
-        Ui.Button { objectName:"applyRange"; text:strings.t("range.apply"); bordered:true; focusable:true; enabled:!root.demo && root.changeRange !== null; onClicked:root.rangeError=!root.changeRange(Number(rangeInput.text)) }
+        Ui.Button { objectName:"applyRange"; text:strings.t("range.apply"); bordered:true; focusable:true; enabled:!root.demo && root.changeRange !== null; onClicked:root.applyRange() }
     }
-    PlainText { Layout.fillWidth:true; text:root.rangeError ? strings.t("range.error") : strings.t("range.hint"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
+    PlainText { Layout.fillWidth:true; text:root.rangeError ? strings.t(root.rangeError) : strings.t("range.hint"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
     PlainText { Layout.fillWidth:true; text:strings.t("coverage"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
     RowLayout {
         visible: root.configured && !root.demo && !root.showHome
