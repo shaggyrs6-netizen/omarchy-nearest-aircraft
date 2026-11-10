@@ -39,8 +39,12 @@ Item {
         if (line.length > 16384) return
         try {
             var value = JSON.parse(line)
-            if (value && value.schema === 1 && typeof value.state === "string") root.data = value
-        } catch (e) { root.data = {state:"error", configured:false, nearest:null} }
+            if (value && value.schema === 1 && typeof value.state === "string") {
+                if (value.state === "error" && root.data.configured === true)
+                    value.configured = true
+                root.data = value
+            }
+        } catch (e) { root.data = {state:"error", configured:root.data.configured === true, nearest:null} }
     }
     function issue(payload) {
         if (controller.running || root.demo) return false
@@ -85,7 +89,7 @@ Item {
             if (root.shuttingDown) return
             if (root.intentionalRestart) { root.intentionalRestart = false; return }
             root.crashCount++
-            root.data = {state:"error", configured:false, nearest:null}
+            root.data = {state:"error", configured:root.data.configured === true, nearest:null}
             if (root.crashCount<3) restartTimer.restart()
         }
     }
@@ -105,7 +109,10 @@ Item {
         onExited: function(code, status) {
             controlDeadline.stop()
             var success = code === 0 && root.controlSucceeded
-            if (success) root.data = {state:root.lastAction === "pause" ? "paused" : "loading", configured:true, nearest:null}
+            if (success) {
+                root.data = {state:root.lastAction === "pause" ? "paused" : "loading", configured:true, nearest:null}
+                if (root.lastAction !== "pause" && !reader.running) root.restartReader()
+            }
             root.controlFinished(success)
         }
     }

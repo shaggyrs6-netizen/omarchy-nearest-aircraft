@@ -24,6 +24,17 @@ def row(**changes):
 def feed(*rows):return {'now':NOW*1000,'ac':list(rows)}
 
 class NearestTests(unittest.TestCase):
+    def test_out_of_bounds_timestamp_uses_invalid_feed_path(self):
+        with self.assertRaisesRegex(ValueError, "clock"):
+            n.nearest(dict(feed(), now=10**400), HOME, NOW)
+
+    def test_out_of_bounds_position_does_not_hide_valid_contact(self):
+        candidate, counts = n.nearest(
+            feed(row(lat=10**400), row(hex="def456")), HOME, NOW
+        )
+        self.assertEqual(candidate["hex"], "def456")
+        self.assertEqual(counts["invalidRejected"], 1)
+
     def test_nearest_military_beats_more_distant_civil(self):
         result,_=n.nearest(feed(row(lat=36.22),row(hex='def456',lat=36.201,dbFlags=1,r='10-0215')),HOME,NOW)
         self.assertEqual(result['hex'],'def456');self.assertTrue(result['military'])

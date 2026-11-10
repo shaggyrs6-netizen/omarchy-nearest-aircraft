@@ -31,7 +31,12 @@ AIRLINES = {'BAW':'BA','AAL':'AA','DAL':'DL','SWA':'WN','UAL':'UA','ASA':'AS','J
 REGIONAL = {'SKW','RPA','ENY','JIA','PDT','EDV','ASH','GJS'}
 
 def number(value):
-    return isinstance(value, (int,float)) and not isinstance(value,bool) and math.isfinite(value)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 def identifier(value, length=16):
     if not isinstance(value,str): return ''
