@@ -127,14 +127,30 @@ class NearestTests(unittest.TestCase):
         url=n.query_url(home)
         self.assertIn('/lat/36.2/lon/-86.5/',url);self.assertNotIn('234567',url);self.assertNotIn('543219',url)
     def test_response_size_limit_passed_to_curl(self):
-        response=subprocess.CompletedProcess([],0,b'HTTP/2 200\r\ncontent-type: application/json\r\n\r\n'+json.dumps(feed(row())).encode(),b'')
-        with patch.object(n.subprocess,'run',return_value=response) as run:
+        response=b'HTTP/2 200\r\ncontent-type: application/json\r\n\r\n'+json.dumps(feed(row())).encode()
+        with patch.object(n,'read_curl',return_value=response) as run:
             self.assertEqual(n.fetch(HOME)['now'],NOW*1000)
             arguments=run.call_args.args[0];self.assertIn('--max-filesize',arguments);self.assertIn('--max-time',arguments)
-            self.assertEqual(run.call_args.kwargs['timeout'],10)
+            self.assertEqual(arguments[:2], ['curl', '-q'])
+    def test_stream_rejects_oversized_headers_and_body(self):
+        for output in (b"H" * 80, b"HTTP/2 200\r\n\r\n" + b"B" * 17):
+            with self.subTest(output=output), patch.object(n, "MAX_HEADERS", 64), patch.object(n, "MAX_BODY", 16):
+                command = [sys.executable, "-c", f"import os; os.write(1, {output!r})"]
+                with self.assertRaises(n.FeedError) as failure:
+                    n.read_curl(command)
+                self.assertEqual(failure.exception.code, -1)
+
+    def test_stream_discards_stderr_without_blocking(self):
+        response = b"HTTP/2 200\r\n\r\n{}"
+        command = [
+            sys.executable, "-c",
+            f"import os; os.write(2, b'x' * 200000); os.write(1, {response!r})",
+        ]
+        self.assertEqual(n.read_curl(command), response)
+
     def test_429_preserves_retry_after(self):
-        response=subprocess.CompletedProcess([],0,b'HTTP/2 429\r\nretry-after: 120\r\n\r\n{}',b'')
-        with patch.object(n.subprocess,'run',return_value=response):
+        response=b'HTTP/2 429\r\nretry-after: 120\r\n\r\n{}'
+        with patch.object(n,'read_curl',return_value=response):
             with self.assertRaises(n.FeedError) as context:n.fetch(HOME)
             self.assertEqual(context.exception.code,429);self.assertEqual(context.exception.retry_after,120)
 

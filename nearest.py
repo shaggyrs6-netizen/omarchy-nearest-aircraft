@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Nearest airborne aircraft. Exact home coordinates and telemetry never enter logs."""
 import argparse
+import ctypes
 import datetime as dt
 import email.utils
 import fcntl
@@ -9,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import re
+import selectors
 import signal
 import stat
 import subprocess
@@ -22,6 +24,9 @@ MAX_AGE = 20
 DEFAULT_RANGE_MILES = 70
 MAX_RANGE_MILES = 100
 MAX_BODY = 2_000_000
+MAX_HEADERS = 65_536
+PR_SET_PDEATHSIG = 1
+stopping = False
 DEFAULT_STATE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home()/'.local/state'))) / 'nearest-aircraft'
 # Small factual code cross-reference, checked against IATA on 8 November 2026.
 # Regional codeshares deliberately retain their broadcast callsigns.
@@ -178,16 +183,79 @@ def query_url(home,range_miles=DEFAULT_RANGE_MILES):
 class FeedError(Exception):
     def __init__(self,code,retry_after=0):self.code=code;self.retry_after=retry_after
 
-def fetch(home,range_miles=DEFAULT_RANGE_MILES):
-    command=['curl','--silent','--show-error','--include','--suppress-connect-headers','--max-time','8',
+def request_stop(_signal, _frame):
+    global stopping
+    stopping = True
+
+def read_curl(command, shell_parent=None):
+    worker_pid = os.getpid()
+    libc = ctypes.CDLL(None, use_errno=True)
+
+    def arm_parent_death():
+        # The worker is single-threaded. Arm this before exec and check for
+        # a worker exit between fork and prctl.
+        if libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0) != 0:
+            os._exit(127)
+        if os.getppid() != worker_pid:
+            os._exit(127)
+
+    deadline = time.monotonic() + 10
+    child = subprocess.Popen(
+        command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, preexec_fn=arm_parent_death,
+    )
+    output = bytearray()
+    body_start = None
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(child.stdout, selectors.EVENT_READ)
+            while True:
+                if stopping or (shell_parent is not None and os.getppid() != shell_parent):
+                    raise SystemExit(0)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise FeedError(0)
+                if not selector.get_map():
+                    code = child.poll()
+                    if code is not None:
+                        if code:
+                            raise FeedError(0)
+                        return output
+                    time.sleep(min(remaining, 0.1))
+                    continue
+                if not selector.select(min(remaining, 0.1)):
+                    continue
+                limit = MAX_HEADERS + 4 if body_start is None else body_start + MAX_BODY
+                chunk = os.read(child.stdout.fileno(), min(8192, limit - len(output) + 1))
+                if not chunk:
+                    selector.unregister(child.stdout)
+                    continue
+                output.extend(chunk)
+                if body_start is None:
+                    separator = output.find(b'\r\n\r\n')
+                    if separator >= 0:
+                        if separator > MAX_HEADERS:
+                            raise FeedError(-1)
+                        body_start = separator + 4
+                    elif len(output) >= MAX_HEADERS + 4:
+                        raise FeedError(-1)
+                if body_start is not None and len(output) - body_start > MAX_BODY:
+                    raise FeedError(-1)
+    finally:
+        child.stdout.close()
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=1)
+
+def fetch(home,range_miles=DEFAULT_RANGE_MILES,shell_parent=None):
+    command=['curl','-q','--silent','--include','--suppress-connect-headers','--max-time','8',
         '--connect-timeout','5','--max-filesize',str(MAX_BODY),'--max-redirs','0',
         '--user-agent','NearestAircraft/0.1 personal Omarchy bar widget',query_url(home,range_miles)]
-    try:result=subprocess.run(command,capture_output=True,timeout=10,check=False)
+    try:response=read_curl(command,shell_parent)
     except (OSError,subprocess.TimeoutExpired):raise FeedError(0)
-    if result.returncode:raise FeedError(0)
     try:
-        header,body=result.stdout.split(b'\r\n\r\n',1)
-        if len(header)>65536 or len(body)>MAX_BODY:raise ValueError()
+        header,body=response.split(b'\r\n\r\n',1)
+        if len(header)>MAX_HEADERS or len(body)>MAX_BODY:raise ValueError()
         status=int(header.splitlines()[0].split()[1])
         headers={line.split(b':',1)[0].lower():line.split(b':',1)[1].strip() for line in header.splitlines()[1:] if b':' in line}
         retry=0
@@ -223,7 +291,7 @@ def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES):
     try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:return 3
     parent=os.getppid();last_revision=None;last_state=None;last_fetch=0
-    while os.getppid()==parent:
+    while not stopping and os.getppid()==parent:
         home=read_local(directory/'home.json')
         revision=home.get('revision') if valid_home(home) else None
         circuit=read_local(directory/'circuit.json',{})
@@ -241,7 +309,7 @@ def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES):
             last_fetch=time.monotonic();circuit['nextAllowedAt']=time.time()+INTERVAL
             write_local(directory/'circuit.json',circuit)
             try:
-                data=fetch(home,range_miles);candidate,counts=nearest(data,home,time.time(),range_miles)
+                data=fetch(home,range_miles,parent);candidate,counts=nearest(data,home,time.time(),range_miles)
                 circuit.update(failures=0,blocked=False)
                 emit(dict(state('ok' if candidate else 'empty',True),nearest=candidate,counts=counts))
             except (FeedError,ValueError) as error:
@@ -262,6 +330,7 @@ def main():
     parser.add_argument('command',choices=['worker','control','demo'])
     parser.add_argument('--state-dir',type=Path,default=DEFAULT_STATE)
     parser.add_argument('--demo',action='store_true')
+    parser.add_argument('--quiet-control', action='store_true')
     parser.add_argument('--range-miles',type=int,default=DEFAULT_RANGE_MILES,choices=range(1,MAX_RANGE_MILES+1),metavar='1..100')
     parser.add_argument('--kind',choices=['airline','ga','military'],default='airline')
     args=parser.parse_args()
@@ -270,9 +339,16 @@ def main():
         try:
             raw=sys.stdin.buffer.readline(4097)
             if len(raw)>4096:raise ValueError('invalid_input')
-            emit(control(args.state_dir,json.loads(raw)))
+            result = control(args.state_dir, json.loads(raw))
+            if not args.quiet_control:
+                emit(result)
             return 0
-        except (OSError,ValueError):emit({'ok':False,'error':'invalid_location_or_state'});return 1
+        except (OSError, ValueError):
+            if not args.quiet_control:
+                emit({'ok':False,'error':'invalid_location_or_state'})
+            return 1
+    if not args.demo:
+        signal.signal(signal.SIGTERM, request_stop)
     try:return worker(args.state_dir,args.demo,args.range_miles)
     except (OSError,ValueError,TypeError,OverflowError):emit(state('error'));return 1
 

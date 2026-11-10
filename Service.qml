@@ -30,7 +30,6 @@ Item {
     property int crashCount: 0
     property bool shuttingDown: false
     property var pendingControl: ({})
-    property bool controlSucceeded: false
     property string lastAction: ""
     readonly property bool busy: controller.running
     signal controlFinished(bool success)
@@ -50,7 +49,6 @@ Item {
         if (controller.running || root.demo) return false
         root.pendingControl = payload
         root.lastAction = payload.action
-        root.controlSucceeded = false
         controller.running = true
         controlDeadline.restart()
         return true
@@ -95,20 +93,19 @@ Item {
     }
     Process {
         id: controller
-        command: ["python3", "-B", root.helper, "control"].concat(root.extraArguments)
+        command: ["python3", "-B", root.helper, "control", "--quiet-control"].concat(root.extraArguments)
         stdinEnabled: true
         onStarted: {
             controller.write(JSON.stringify(root.pendingControl) + "\n")
             root.pendingControl = ({})
         }
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try { root.controlSucceeded = JSON.parse(text).ok === true } catch(e) { root.controlSucceeded = false }
-            }
-        }
+        // The controller reports success via its exit code. Close both output
+        // channels so the shell does not accumulate a response.
+        stdout: null
+        stderr: null
         onExited: function(code, status) {
             controlDeadline.stop()
-            var success = code === 0 && root.controlSucceeded
+            var success = code === 0 && status === 0
             if (success) {
                 root.data = {state:root.lastAction === "pause" ? "paused" : "loading", configured:true, nearest:null}
                 if (root.lastAction !== "pause" && !reader.running) root.restartReader()
