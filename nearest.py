@@ -220,7 +220,7 @@ def read_curl(command, shell_parent=None):
                     if code is not None:
                         if code:
                             raise FeedError(0)
-                        return output
+                        return bytes(output)
                     time.sleep(min(remaining, 0.1))
                     continue
                 if not selector.select(min(remaining, 0.1)):

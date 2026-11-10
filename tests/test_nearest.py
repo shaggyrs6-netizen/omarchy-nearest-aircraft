@@ -146,7 +146,9 @@ class NearestTests(unittest.TestCase):
             sys.executable, "-c",
             f"import os; os.write(2, b'x' * 200000); os.write(1, {response!r})",
         ]
-        self.assertEqual(n.read_curl(command), response)
+        received = n.read_curl(command)
+        self.assertIsInstance(received, bytes)
+        self.assertEqual(received, response)
 
     def test_429_preserves_retry_after(self):
         response=b'HTTP/2 429\r\nretry-after: 120\r\n\r\n{}'
