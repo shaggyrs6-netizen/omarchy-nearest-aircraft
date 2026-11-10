@@ -25,6 +25,7 @@ DEFAULT_RANGE_MILES = 70
 MAX_RANGE_MILES = 100
 MAX_BODY = 2_000_000
 MAX_HEADERS = 65_536
+MAX_LOCAL_STATE = 4096
 PR_SET_PDEATHSIG = 1
 stopping = False
 DEFAULT_STATE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home()/'.local/state'))) / 'nearest-aircraft'
@@ -131,11 +132,28 @@ def private_directory(directory):
     directory.chmod(0o700)
     return directory
 
-def read_local(path,default=None):
+def read_local(path, default=None):
     try:
-        if path.is_symlink() or path.stat().st_uid!=os.getuid() or path.stat().st_size>4096:return default
-        return json.loads(path.read_text())
-    except (OSError,ValueError):return default
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                return default
+            if info.st_size > MAX_LOCAL_STATE:
+                return default
+            data = bytearray()
+            while len(data) <= MAX_LOCAL_STATE:
+                chunk = os.read(fd, MAX_LOCAL_STATE + 1 - len(data))
+                if not chunk:
+                    break
+                data.extend(chunk)
+        finally:
+            os.close(fd)
+        if len(data) > MAX_LOCAL_STATE:
+            return default
+        return json.loads(data.decode("utf-8"))
+    except (OSError, ValueError):
+        return default
 
 def write_local(path,data):
     if path.is_symlink():raise ValueError('unsafe_state')

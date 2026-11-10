@@ -178,6 +178,45 @@ class LocalStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d);(p/'real').mkdir();(p/'link').symlink_to(p/'real')
             with self.assertRaises(ValueError):n.control(p/'link',dict(action='home',**HOME))
+    def test_local_read_rejects_symlink_and_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            directory = Path(d)
+            regular = directory / "regular.json"
+            regular.write_text("{}")
+            link = directory / "link.json"
+            link.symlink_to(regular)
+            self.assertEqual(n.read_local(regular, "default"), {})
+            self.assertEqual(n.read_local(link, "default"), "default")
+            self.assertEqual(n.read_local(directory, "default"), "default")
+
+    def test_local_read_rejects_growth_after_fstat(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "home.json"
+            path.write_bytes(b"{}" + b" " * (n.MAX_LOCAL_STATE - 2))
+            original_fstat = os.fstat
+
+            def grow_after_stat(fd):
+                info = original_fstat(fd)
+                with path.open("ab") as stream:
+                    stream.write(b" ")
+                return info
+
+            self.assertEqual(n.read_local(path), {})
+            with patch.object(n.os, "fstat", side_effect=grow_after_stat):
+                self.assertEqual(n.read_local(path, "default"), "default")
+
+    def test_local_read_fifo_without_writer_returns_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "home.json"
+            os.mkfifo(path)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c",
+                 "import sys, nearest; assert nearest.read_local(sys.argv[1], 'default') == 'default'",
+                 str(path)],
+                cwd=ROOT, timeout=3, check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+
     def test_unconfigured_worker_performs_no_network_call(self):
         with tempfile.TemporaryDirectory() as d:
             p=subprocess.Popen([sys.executable,'-B',str(ROOT/'nearest.py'),'worker','--state-dir',d],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
