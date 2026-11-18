@@ -9,9 +9,19 @@ A compact Omarchy bar widget showing the nearest **reported airborne aircraft** 
 - Civil, Military and unclassified aircraft are eligible.
 - Search range from **1 to 100 statute miles**, default 70 miles.
 - Airline flight numbers where reliably derivable, such as `BAW232 → BA232`; registrations preferred for GA and provider-flagged military aircraft.
-- Click for aircraft details and **Flightradar24** / **ADS-B Exchange**, opened in your default browser.
+- Red emergency squawk alerts, an orange tail-number watchlist and a selectable tracker that opens in your default browser.
 - Theme-aware compact readout, local home settings, pause/resume and demonstration mode.
 - Live aircraft data from [ADSB.fi](https://adsb.fi/), refreshed every ten seconds while configured and enabled.
+
+## Screenshots
+
+Captured in demo mode with synthetic aircraft.
+
+| Emergency squawk | Watched registration |
+| --- | --- |
+| ![Red emergency alert in the bar](screenshots/nearest-aircraft-emergency.png) | ![Orange watchlist match in the bar](screenshots/nearest-aircraft-watchlist.png) |
+
+[Settings and tracker selection](screenshots/nearest-aircraft-settings.png) · [Emergency squawk in aircraft details](screenshots/nearest-aircraft-emergency-details.png)
 
 ## Requirements
 
@@ -41,7 +51,7 @@ This places the widget beside the clock. An existing manually installed plugin w
 
 The widget performs **no address lookup**. Exact coordinates are stored privately on your machine. Nothing polls before a valid location is saved.
 
-Change **Search range** in the popup and click **Apply**, or change it in the widget settings. Range is a whole number from 1 to 100 miles and persists across restarts. The popup also has **Pause polling**, **Resume polling** and **Change home** controls.
+Middle-click the bar widget to open **Settings**. Change **Search range** there and click **Apply**, or change it in the widget settings. Range is a whole number from 1 to 100 miles and persists across restarts. The popup also has **Pause polling**, **Resume polling** and **Change home** controls.
 
 To open the popup from a terminal:
 
@@ -56,6 +66,14 @@ omarchy bar set shaggyrs6.nearest-aircraft rangeMiles 10 --json
 ```
 
 **Demonstration mode** in widget settings uses synthetic aircraft, with a clearly labelled popup. It makes no feed requests and does not read your saved home.
+
+## Alerts and tracking
+
+In **Settings**, turn **Emergency squawk alerts** on or off and choose which codes to flag. All three codes are selected by default. Turning alerts off keeps your selections for next time.
+
+Enter one or more registrations under **Watched tail numbers**, separated by commas, and click **Apply**. Matches use the feed's registration. The bar shows red for squawk 7500, 7600 or 7700, then orange for a watchlist match, then its normal nearest-aircraft readout. When multiple aircraft qualify at the same priority, the closest one is shown. Alerts apply to fresh airborne reports within the saved range and clear as reports leave range or expire.
+
+The **Default tracker** menu saves your choice between ADS-B Exchange, Flightradar24, AirNav Radar (RadarBox) and FlightAware. ADS-B Exchange is the default. Left-click an active aircraft in the bar to open your choice in the default browser. Right-click opens the aircraft details. The watchlist and tracker choice are saved in Omarchy's shell settings.
 
 ## Pause, disable or remove
 

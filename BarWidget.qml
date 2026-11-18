@@ -8,6 +8,7 @@ import "UiSafe.js" as Safe
 BarWidget {
     id: root
     moduleName: "shaggyrs6.nearest-aircraft"
+    property bool settingsMode: false
     property var anchorItem: button
     readonly property var svc: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
     readonly property bool fresh: svc && svc.fresh
@@ -16,9 +17,13 @@ BarWidget {
     Translations { id:strings; directory:Qt.resolvedUrl("i18n") }
     Binding { target:root.svc; property:"settings"; value:root.settings; when:root.svc !== null }
 
+    readonly property string alertLabel: !aircraft ? "" : aircraft.emergencySquawk
+        ? strings.t("alerts.squawk").arg(aircraft.emergencySquawk) : aircraft.watched ? strings.t("alerts.watched") : ""
+    readonly property color alertColor: aircraft && aircraft.emergencySquawk ? "#ff5252"
+        : aircraft && aircraft.watched ? "#ff992e" : foreground
     readonly property string stateKey: !svc ? "loading" : svc.data.state === "ok" && !fresh ? "stale" : String(svc.data.state || "loading")
     readonly property string statusText: strings.t("bar." + stateKey, strings.t("bar.error"))
-    readonly property string idText: aircraft ? Safe.plain(aircraft.displayId,12) : ""
+    readonly property string idText: aircraft ? Safe.plain(aircraft.watched ? aircraft.tail : aircraft.displayId,12) : ""
     readonly property string altitudeText: aircraft && Safe.number(aircraft.altitudeFt) ? I18n.formatNumber(Math.round(aircraft.altitudeFt),0) + " ft" : "? ft"
     readonly property string distanceText: aircraft ? I18n.formatNumber(aircraft.distanceMi,1) + " mi" : ""
     implicitWidth: vertical ? barSize : Style.space(250)
@@ -32,8 +37,16 @@ BarWidget {
         labelVisible: false
         hasVisualContent: true
         pressable: true
-        tooltipText: Safe.plain(root.fresh ? strings.t("tooltip.aircraft").arg(root.idText).arg(root.altitudeText).arg(root.distanceText) : root.statusText)
-        onPressed: function(code) { if(code !== Qt.LeftButton) return; if(root.bar) root.bar.hideTooltip(root); root.toggle() }
+        tooltipText: Safe.plain(root.fresh ? strings.t("tooltip.aircraft").arg((root.alertLabel ? root.alertLabel + " · " : "") + root.idText).arg(root.altitudeText).arg(root.distanceText) : root.statusText)
+        onPressed: function(code) {
+            if (root.bar) root.bar.hideTooltip(root)
+            if (code === Qt.MiddleButton) root.toggleView(true)
+            else if (code === Qt.RightButton) root.toggleView(false)
+            else if (code === Qt.LeftButton) {
+                if (root.fresh && root.svc.visit(root.svc.defaultTracker)) root.close()
+                else root.toggleView(false)
+            }
+        }
         Item {
             anchors.centerIn: parent
             width: root.vertical ? parent.height : parent.width
@@ -49,9 +62,9 @@ BarWidget {
                 spacing: Style.space(5)
                 PlainText {
                     id: plane
-                    text:"✈"
+                    text:root.alertLabel ? "!" : "✈"
                     anchors.verticalCenter:parent.verticalCenter
-                    color:Commons.Color.accent
+                    color:root.alertLabel ? root.alertColor : Commons.Color.accent
                     renderType:Text.NativeRendering
                 }
                 PlainText {
@@ -65,7 +78,7 @@ BarWidget {
                     wrapMode:Text.NoWrap
                     elide:Text.ElideRight
                     anchors.verticalCenter:parent.verticalCenter
-                    color:root.foreground
+                    color:root.alertColor
                     font.weight:Font.DemiBold
                     renderType:Text.NativeRendering
                 }
@@ -85,9 +98,28 @@ BarWidget {
         var next = Object.assign({}, root.settings, {rangeMiles:value})
         return root.bar.shell.updateEntryInline(root.moduleName, next) === true
     }
-    function open() { panel.controller.show() }
+    function setTracking(tails, provider) {
+        var normalized = Safe.parseWatchTails(tails)
+        if (normalized === null || !root.bar || !root.bar.shell) return false
+        var tracker = Safe.tracker(provider)
+        if (root.svc && root.svc.watchTails === normalized && root.svc.defaultTracker === tracker) return true
+        var next = Object.assign({}, root.settings, {watchTails:normalized, defaultTracker:tracker})
+        return root.bar.shell.updateEntryInline(root.moduleName, next) === true
+    }
+    function setSquawks(enabled, codes) {
+        if (!root.bar || !root.bar.shell) return false
+        var next = Object.assign({}, root.settings, {squawkEnabled:enabled, squawkCodes:Safe.squawkCodes(codes).join(",")})
+        return root.bar.shell.updateEntryInline(root.moduleName, next) === true
+    }
+    function open() { settingsMode = false; panel.controller.show() }
+    function openSettings() { settingsMode = true; panel.controller.show() }
+    function toggleView(showSettings) {
+        if (opened && settingsMode === showSettings) close()
+        else if (showSettings) openSettings()
+        else open()
+    }
     function close() { panel.controller.hide() }
-    function toggle() { opened ? close() : open() }
+    function toggle() { toggleView(false) }
     function closeForPopoutSwitch() { close() }
     NearestPanel { id:panel; widget:root }
 }

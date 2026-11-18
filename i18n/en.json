@@ -9,7 +9,7 @@
   "bar.offline": "✈ Feed unavailable",
   "bar.blocked": "✈ Feed stopped",
   "bar.error": "✈ Needs attention",
-  "tooltip.aircraft": "%1 · %2 · %3. Click for details and tracking links.",
+  "tooltip.aircraft": "%1 · %2 · %3. Click to open your default tracker. Right-click for details. Middle-click for settings.",
   "state.configure": "Set your home location below. No aircraft requests have been made.",
   "state.loading": "Waiting for a fresh aircraft report. A previous rate-limit cooldown may still apply.",
   "state.paused": "Aircraft polling is paused. Resume when you want it back.",
@@ -49,5 +49,18 @@
   "range.saveError": "Could not save the range. Try again or check Omarchy widget settings.",
   "range.error": "Enter a whole number from 1 to 100 miles.",
   "links.fr24": "Open Flightradar24 ↗",
-  "links.adsbx": "Open ADS-B Exchange ↗"
+  "links.adsbx": "Open ADS-B Exchange ↗",
+  "links.open": "Open %1 ↗",
+  "links.default": "Default tracker",
+  "watch.label": "Watched tail numbers",
+  "watch.hint": "Separate tail numbers with commas",
+  "watch.error": "Could not save. Check the tail numbers and try again.",
+  "alerts.watched": "Watched aircraft",
+  "alerts.squawk": "Alert · Squawk %1",
+  "settings.title": "Settings",
+  "alerts.enabled": "Emergency squawk alerts",
+  "alerts.code.7500": "7500 · Unlawful interference",
+  "alerts.code.7600": "7600 · Radio failure",
+  "alerts.code.7700": "7700 · General emergency",
+  "alerts.error": "Could not save squawk settings."
 }

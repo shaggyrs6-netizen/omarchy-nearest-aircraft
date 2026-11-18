@@ -22,3 +22,12 @@ console.log('UI safety: markup, URL allowlists, stale data and plain-text sinks 
 
 for (const value of [1,2,70,100]) assert.equal(ui.rangeMiles(value),value);
 for (const value of [0,101,1.5,null,true,'1',NaN,Infinity]) assert.equal(ui.rangeMiles(value),70);
+
+assert.equal(ui.parseWatchTails(' n3200x, g-abcd  N3200X '), 'N3200X,G-ABCD');
+assert.equal(ui.parseWatchTails('N3200X/'), null);
+assert.equal(ui.tracker(undefined), 'adsbx');
+for (const provider of ['radarbox', 'flightaware']) {
+  assert(ui.validLink(ui.trackerUrl({tail:'N3200X'}, provider), provider));
+  assert(ui.validLink(ui.trackerUrl({}, provider), provider));
+  assert(!ui.validLink(ui.trackerUrl({tail:'N3200X/other'}, provider), provider));
+}

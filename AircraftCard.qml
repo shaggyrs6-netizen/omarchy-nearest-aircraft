@@ -9,14 +9,27 @@ ColumnLayout {
     id: root
     objectName: "aircraftCard"
     property var svc: null
+    property bool settingsMode: false
+    property var changeSquawks: null
+    property bool squawkError: false
+    signal settingsRequested()
+    function saveSquawks(enabled, codes) {
+        squawkError = !changeSquawks || !changeSquawks(enabled, codes.join(","))
+    }
     property bool panelOpen: true
     property bool editHome: false
     property bool inputError: false
     property var changeRange: null
+    property var changeTracking: null
+    property string alertLabel: ""
+    property color alertColor: Commons.Color.accent
+    property bool trackingError: false
+    readonly property string savedTails: svc ? svc.watchTails : ""
+    onSavedTailsChanged: if (tailInput && !tailInput.activeFocus) tailInput.text = savedTails
     property string rangeError: ""
     readonly property string savedRangeText: svc ? String(svc.rangeMiles) : ""
     onSavedRangeTextChanged: if (rangeInput && !rangeInput.activeFocus) rangeInput.text = savedRangeText
-    readonly property bool inputFocused: latitude.activeFocus || longitude.activeFocus || rangeInput.activeFocus
+    readonly property bool inputFocused: latitude.activeFocus || longitude.activeFocus || rangeInput.activeFocus || tailInput.activeFocus || trackerPicker.popupOpen
     readonly property bool configured: svc && svc.data.configured === true
     readonly property bool fresh: svc && svc.fresh
     readonly property var aircraft: fresh ? svc.aircraft : null
@@ -28,6 +41,9 @@ ColumnLayout {
     Translations { id:strings; directory:Qt.resolvedUrl("i18n") }
     onPanelOpenChanged: {
         rangeError = ""
+        trackingError = false
+        squawkError = false
+        tailInput.text = savedTails
         rangeInput.text = savedRangeText
         if (!panelOpen) {
             latitude.text = ""
@@ -50,16 +66,17 @@ ColumnLayout {
             root.inputError=!success
         }
     }
-    PlainText { Layout.fillWidth:true; text:root.demo ? strings.t("title.demo") : strings.t("title"); font.pixelSize:Style.font.subtitle; font.bold:true }
+    PlainText { Layout.fillWidth:true; text:root.settingsMode ? strings.t("settings.title") : root.demo ? strings.t("title.demo") : strings.t("title"); font.pixelSize:Style.font.subtitle; font.bold:true }
     PlainText {
         Layout.fillWidth:true
-        visible: !root.fresh
+        visible: !root.settingsMode && !root.fresh
         text: strings.t("state." + (!svc ? "loading" : svc.data.state === "ok" ? "stale" : svc.data.state),strings.t("state.error"))
     }
     ColumnLayout {
-        visible: root.fresh
+        visible: !root.settingsMode && root.fresh
         Layout.fillWidth:true
         spacing: Style.space(8)
+        PlainText { Layout.fillWidth:true; visible:root.alertLabel !== ""; text:root.alertLabel; color:root.alertColor; font.bold:true }
         PlainText { Layout.fillWidth:true; text:aircraft ? Safe.plain(aircraft.displayId,24) : ""; font.pixelSize:Style.font.title; font.bold:true; color:Commons.Color.accent }
         PlainText {
             Layout.fillWidth:true
@@ -73,20 +90,102 @@ ColumnLayout {
         PlainText { Layout.fillWidth:true; text:aircraft ? strings.t("identity."+aircraft.idKind) : ""; opacity:.72; font.pixelSize:Style.font.bodySmall }
         PlainText { Layout.fillWidth:true; visible:aircraft && aircraft.military; text:strings.t("details.military"); font.pixelSize:Style.font.bodySmall }
     }
-    RowLayout {
+    Ui.Button {
+        visible:!root.settingsMode
+        objectName:"openDefaultTracker"
         Layout.fillWidth:true
-        Ui.Button { objectName:"openFr24"; Layout.fillWidth:true; text:strings.t("links.fr24"); bordered:true; focusable:true; enabled:root.fresh; onClicked:if(svc) svc.visit("fr24") }
-        Ui.Button { objectName:"openAdsbx"; Layout.fillWidth:true; text:strings.t("links.adsbx"); bordered:true; focusable:true; enabled:root.fresh; onClicked:if(svc) svc.visit("adsbx") }
+        text:strings.t("links.open").arg(trackerPicker.currentLabel())
+        bordered:true
+        focusable:true
+        enabled:root.fresh
+        onClicked:if (svc) svc.visit(svc.defaultTracker)
     }
-    PlainText { Layout.fillWidth:true; text:strings.t("links.note"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
     RowLayout {
+        visible:!root.settingsMode
         Layout.fillWidth:true
-        PlainText { text:strings.t("range.label") }
-        Ui.TextField { id:rangeInput; objectName:"rangeInput"; Layout.fillWidth:true; text:root.savedRangeText; onTextEdited:root.rangeError=""; maximumLength:3; selectByMouse:true }
-        PlainText { text:"mi" }
-        Ui.Button { objectName:"applyRange"; text:strings.t("range.apply"); bordered:true; focusable:true; enabled:!root.demo && root.changeRange !== null; onClicked:root.applyRange() }
+        Ui.Button { objectName:"openFr24"; visible:trackerPicker.value !== "fr24"; Layout.fillWidth:true; text:strings.t("links.fr24"); bordered:true; focusable:true; enabled:root.fresh; onClicked:if(svc) svc.visit("fr24") }
+        Ui.Button { objectName:"openAdsbx"; visible:trackerPicker.value !== "adsbx"; Layout.fillWidth:true; text:strings.t("links.adsbx"); bordered:true; focusable:true; enabled:root.fresh; onClicked:if(svc) svc.visit("adsbx") }
     }
-    PlainText { Layout.fillWidth:true; text:root.rangeError ? strings.t(root.rangeError) : strings.t("range.hint"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
+    Ui.Button {
+        visible:!root.settingsMode
+        Layout.fillWidth:true
+        text:strings.t("settings.title")
+        focusable:true
+        onClicked:root.settingsRequested()
+    }
+    ColumnLayout {
+        visible:root.settingsMode
+        Layout.fillWidth:true
+        spacing:Style.space(8)
+        Ui.Dropdown {
+            id:trackerPicker
+            objectName:"defaultTracker"
+            Layout.fillWidth:true
+            label:strings.t("links.default")
+            value:svc ? svc.defaultTracker : "adsbx"
+            options:[
+                {value:"adsbx", label:"ADS-B Exchange"},
+                {value:"fr24", label:"Flightradar24"},
+                {value:"radarbox", label:"AirNav Radar (RadarBox)"},
+                {value:"flightaware", label:"FlightAware"}
+            ]
+            enabled:root.changeTracking !== null && svc !== null
+            onChanged:function(provider) { root.trackingError = !root.changeTracking(svc.watchTails, provider) }
+        }
+        Ui.Toggle {
+            objectName:"squawkEnabled"
+            Layout.fillWidth:true
+            label:strings.t("alerts.enabled")
+            checked:root.svc && root.svc.squawkEnabled
+            enabled:root.svc !== null && root.changeSquawks !== null
+            onClicked:root.saveSquawks(!checked, root.svc.squawkCodes)
+        }
+        Repeater {
+            objectName:"squawkOptions"
+            model:["7500", "7600", "7700"]
+            delegate: Ui.Toggle {
+                required property string modelData
+                objectName:"squawk" + modelData
+                Layout.fillWidth:true
+                label:strings.t("alerts.code." + modelData)
+                checked:root.svc && root.svc.squawkCodes.includes(modelData)
+                enabled:root.svc && root.svc.squawkEnabled && root.changeSquawks !== null
+                onClicked: {
+                    var selected = root.svc.squawkCodes
+                    root.saveSquawks(true, checked ? selected.filter(code => code !== modelData) : selected.concat(modelData))
+                }
+            }
+        }
+        PlainText { Layout.fillWidth:true; visible:root.squawkError; text:strings.t("alerts.error") }
+        RowLayout {
+            Layout.fillWidth:true
+            PlainText { text:strings.t("range.label") }
+            Ui.TextField { id:rangeInput; objectName:"rangeInput"; Layout.fillWidth:true; text:root.savedRangeText; onTextEdited:root.rangeError=""; maximumLength:3; selectByMouse:true }
+            PlainText { text:"mi" }
+            Ui.Button { objectName:"applyRange"; text:strings.t("range.apply"); bordered:true; focusable:true; enabled:!root.demo && root.changeRange !== null; onClicked:root.applyRange() }
+        }
+        PlainText { Layout.fillWidth:true; text:root.rangeError ? strings.t(root.rangeError) : strings.t("range.hint"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
+        PlainText { text:strings.t("watch.label") }
+        RowLayout {
+            Layout.fillWidth:true
+            Ui.TextField {
+                id:tailInput
+                objectName:"watchTails"
+                Layout.fillWidth:true
+                maximumLength:511
+                placeholderText:strings.t("watch.hint")
+                selectByMouse:true
+            }
+            Ui.Button {
+                text:strings.t("range.apply")
+                bordered:true
+                focusable:true
+                enabled:root.changeTracking !== null && svc !== null
+                onClicked:root.trackingError = !root.changeTracking(tailInput.text, svc.defaultTracker)
+            }
+        }
+        PlainText { Layout.fillWidth:true; visible:root.trackingError; text:strings.t("watch.error") }
+    }
     PlainText { Layout.fillWidth:true; text:strings.t("coverage"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
     RowLayout {
         visible: root.configured && !root.demo && !root.showHome

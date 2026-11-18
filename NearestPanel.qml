@@ -30,7 +30,12 @@ Panel {
                 clip:true
                 boundsBehavior:Flickable.StopAtBounds
                 Controls.ScrollBar.vertical: Controls.ScrollBar {}
-                AircraftCard { id:card; width:scroll.width; svc:root.widget.svc; panelOpen:root.opened; changeRange:root.widget.setRange }
+                Connections {
+                    target:root.widget
+                    function onSettingsModeChanged() { scroll.contentY = 0 }
+                    function onOpenedChanged() { if (root.widget.opened) scroll.contentY = 0 }
+                }
+                AircraftCard { id:card; settingsMode:root.widget.settingsMode; changeSquawks:root.widget.setSquawks; onSettingsRequested:root.widget.openSettings(); width:scroll.width; svc:root.widget.svc; panelOpen:root.opened; changeRange:root.widget.setRange; changeTracking:root.widget.setTracking; alertLabel:root.widget.alertLabel; alertColor:root.widget.alertColor }
             }
         }
     }

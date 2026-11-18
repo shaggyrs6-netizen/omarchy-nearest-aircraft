@@ -116,6 +116,40 @@ class NearestTests(unittest.TestCase):
         a,_=n.nearest(feed(row()),HOME,NOW)
         self.assertEqual(a['fr24Url'],'https://www.flightradar24.com/data/aircraft/n123ab')
         self.assertEqual(a['adsbxUrl'],'https://globe.adsbexchange.com/?icao=abc123')
+    def test_emergency_priority_and_watchlist_use_every_eligible_aircraft(self):
+        ordinary = row(r='N123AB', squawk='1200')
+        watched = row(hex='def456', lat=36.215, r='n3200x', flight='BAW232')
+        for code in ('7500', '7600', '7700', 7700):
+            with self.subTest(code=code):
+                emergency = row(hex='abc456', lat=36.218, squawk=code)
+                result, _ = n.nearest(feed(ordinary, watched, emergency), HOME, NOW, 2, {'N3200X'})
+                self.assertEqual(result['hex'], emergency['hex'])
+                self.assertEqual(result['emergencySquawk'], str(code))
+        result, _ = n.nearest(feed(ordinary, watched), HOME, NOW, 2, {'N3200X'})
+        self.assertEqual(result['tail'], 'N3200X')
+        self.assertTrue(result['watched'])
+        self.assertEqual(result['emergencySquawk'], '')
+
+    def test_squawk_selection_does_not_disable_tail_watch(self):
+        ordinary = row()
+        watched = row(hex='def456', lat=36.215, r='N3200X', squawk='7600')
+        emergency = row(hex='123abc', lat=36.218, squawk='7700')
+        for codes in ((), ('7500', '7600')):
+            with self.subTest(codes=codes):
+                result, _ = n.nearest(feed(ordinary, watched, emergency), HOME, NOW, 2, {'N3200X'}, codes)
+                self.assertTrue(result['watched'])
+                self.assertEqual(result['emergencySquawk'], '7600' if codes else '')
+
+    def test_watch_and_emergency_exclude_ground_stale_and_out_of_range(self):
+        ordinary = row(flight='N3200X', squawk='1200')
+        ground = row(hex='def456', r='N3200X', squawk='7500', alt_baro='ground')
+        stale = row(hex='abc456', r='N3200X', squawk='7600', seen_pos=21)
+        distant = row(hex='def123', r='N3200X', squawk='7700', lat=36.25)
+        result, _ = n.nearest(feed(ordinary, ground, stale, distant), HOME, NOW, 1, {'N3200X'})
+        self.assertEqual(result['hex'], ordinary['hex'])
+        self.assertFalse(result['watched'])
+        self.assertEqual(result['emergencySquawk'], '')
+
     def test_bearing_distance(self):
         metres,bearing,direction=n.distance_bearing(0,0,0,1)
         self.assertAlmostEqual(metres,111195,delta=1);self.assertEqual(direction,'E');self.assertAlmostEqual(bearing,90)

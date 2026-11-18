@@ -79,7 +79,10 @@ def links(tail,flight,hexcode):
 def valid_range(value):
     return number(value) and value == int(value) and 1 <= value <= MAX_RANGE_MILES
 
-def nearest(data,home,now,range_miles=DEFAULT_RANGE_MILES):
+EMERGENCY_CODES = ('7500', '7600', '7700')
+
+
+def nearest(data,home,now,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_codes=EMERGENCY_CODES):
     if not valid_range(range_miles):raise ValueError("range")
     if not isinstance(data,dict) or not isinstance(data.get('ac'),list) or len(data['ac'])>5000:
         raise ValueError('schema')
@@ -115,12 +118,23 @@ def nearest(data,home,now,range_miles=DEFAULT_RANGE_MILES):
         display,kind,military,flight=display_identity(dict(row,hex=code.lower()))
         tail=identifier(row.get('r'),24);callsign=identifier(row.get('flight'))
         fr24,adsbx=links(tail,flight,code.lower())
-        candidates.append({'hex':code.lower(),'displayId':display,'idKind':kind,'tail':tail,'callsign':callsign,
+        squawk=row.get('squawk')
+        emergency = str(squawk) if type(squawk) in (str, int) and squawk in (
+            '7500', '7600', '7700', 7500, 7600, 7700
+        ) else ''
+        if emergency not in squawk_codes:
+            emergency = ''
+        watched=bool(tail and tail in watch_tails)
+        candidates.append({'emergencySquawk':emergency,'watched':watched,'hex':code.lower(),'displayId':display,'idKind':kind,'tail':tail,'callsign':callsign,
             'military':military,'aircraftType':identifier(row.get('t'),12),'altitudeFt':altitude,'altitudeBasis':basis,
             'distanceMi':metres/1609.344,'bearingDeg':bearing,'direction':direction,'positionTime':position_time,
             'fr24Url':fr24,'adsbxUrl':adsbx,'_distance':metres})
     if not candidates:return None,counts
-    result=min(candidates,key=lambda c:(c['_distance'],c['hex']))
+    def priority(candidate):
+        tier = 0 if candidate['emergencySquawk'] else 1 if candidate['watched'] else 2
+        return tier, candidate['_distance'], candidate['hex']
+
+    result = min(candidates, key=priority)
     del result['_distance']
     return result,counts
 
@@ -300,7 +314,7 @@ def demo_snapshot(kind='airline'):
     result,_=nearest({'now':now*1000,'ac':[row]},{'latitude':36.2,'longitude':-86.52},now)
     return dict(state('ok',True),nearest=result,demo=True)
 
-def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES):
+def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_codes=EMERGENCY_CODES):
     if demo:
         emit(demo_snapshot())
         while True:time.sleep(INTERVAL);emit(demo_snapshot())
@@ -327,7 +341,7 @@ def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES):
             last_fetch=time.monotonic();circuit['nextAllowedAt']=time.time()+INTERVAL
             write_local(directory/'circuit.json',circuit)
             try:
-                data=fetch(home,range_miles,parent);candidate,counts=nearest(data,home,time.time(),range_miles)
+                data=fetch(home,range_miles,parent);candidate,counts=nearest(data,home,time.time(),range_miles,watch_tails,squawk_codes)
                 circuit.update(failures=0,blocked=False)
                 emit(dict(state('ok' if candidate else 'empty',True),nearest=candidate,counts=counts))
             except (FeedError,ValueError) as error:
@@ -351,7 +365,11 @@ def main():
     parser.add_argument('--quiet-control', action='store_true')
     parser.add_argument('--range-miles',type=int,default=DEFAULT_RANGE_MILES,choices=range(1,MAX_RANGE_MILES+1),metavar='1..100')
     parser.add_argument('--kind',choices=['airline','ga','military'],default='airline')
+    parser.add_argument('--watch-tails',default='')
+    parser.add_argument('--squawk-codes',default=','.join(EMERGENCY_CODES))
     args=parser.parse_args()
+    squawk_codes=set(args.squawk_codes.split(',')) & set(EMERGENCY_CODES)
+    watch_tails={tail for token in args.watch_tails[:511].split(',') if (tail:=identifier(token,24))}
     if args.command=='demo':emit(demo_snapshot(args.kind));return 0
     if args.command=='control':
         try:
@@ -367,7 +385,7 @@ def main():
             return 1
     if not args.demo:
         signal.signal(signal.SIGTERM, request_stop)
-    try:return worker(args.state_dir,args.demo,args.range_miles)
+    try:return worker(args.state_dir,args.demo,args.range_miles,watch_tails,squawk_codes)
     except (OSError,ValueError,TypeError,OverflowError):emit(state('error'));return 1
 
 if __name__=='__main__':
