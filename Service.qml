@@ -87,7 +87,9 @@ Item {
     Timer { id:controlDeadline; interval:5000; onTriggered:if (controller.running) controller.running=false }
     Process {
         id: reader
-        command: ["python3", "-B", root.helper, "worker", "--range-miles", String(root.rangeMiles), "--watch-tails=" + root.watchTails, "--squawk-codes=" + root.activeSquawkCodes].concat(root.extraArguments).concat(root.demo ? ["--demo"] : [])
+        stdinEnabled: true
+        onStarted: reader.write(root.watchTails + "\n")
+        command: ["python3", "-B", root.helper, "worker", "--range-miles", String(root.rangeMiles), "--watch-stdin", "--squawk-codes=" + root.activeSquawkCodes].concat(root.extraArguments).concat(root.demo ? ["--demo"] : [])
         running: false
         stdout: SplitParser { splitMarker:"\n"; onRead:function(line) { root.apply(line) } }
         onExited: function(code, status) {
@@ -126,7 +128,7 @@ Item {
         function status(): string {
             return JSON.stringify({state:root.data.state, configured:root.data.configured === true,
                 fresh:root.fresh, demo:root.demo, rangeMiles:root.rangeMiles, workerRunning:reader.running,
-                watchTails:root.watchTails, defaultTracker:root.defaultTracker,
+                watchlistCount:root.watchTails ? root.watchTails.split(",").length : 0, defaultTracker:root.defaultTracker,
                 squawkEnabled:root.squawkEnabled, squawkCodes:root.squawkCodes,
                 displayId:root.aircraft ? Safe.plain(root.aircraft.displayId,24) : "",
                 altitudeFt:root.aircraft ? root.aircraft.altitudeFt : null})

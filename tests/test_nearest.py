@@ -251,6 +251,28 @@ class LocalStateTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0)
 
+    def test_worker_reads_watchlist_privately_at_startup(self):
+        command = [sys.executable, '-B', str(ROOT/'nearest.py'), 'worker', '--demo', '--watch-stdin']
+        with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+            try:
+                proc.stdin.write(b'N123AB\n')
+                proc.stdin.flush()
+                self.assertTrue(select.select([proc.stdout], [], [], 3)[0])
+                self.assertTrue(json.loads(proc.stdout.readline())['nearest']['watched'])
+                self.assertNotIn(b'N123AB', Path(f'/proc/{proc.pid}/cmdline').read_bytes())
+            finally:
+                proc.terminate()
+                proc.wait(timeout=3)
+
+    def test_worker_rejects_oversized_or_incomplete_watchlist(self):
+        command = [sys.executable, '-B', str(ROOT/'nearest.py'), 'worker', '--demo', '--watch-stdin']
+        for line in (b'A' * 512 + b'\n', b'N123AB'):
+            with self.subTest(line=line):
+                proc = subprocess.run(command, input=line, capture_output=True, timeout=3)
+                self.assertEqual(proc.returncode, 1)
+                self.assertEqual(json.loads(proc.stdout)['state'], 'error')
+                self.assertNotIn(line, proc.stdout)
+
     def test_unconfigured_worker_performs_no_network_call(self):
         with tempfile.TemporaryDirectory() as d:
             p=subprocess.Popen([sys.executable,'-B',str(ROOT/'nearest.py'),'worker','--state-dir',d],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)

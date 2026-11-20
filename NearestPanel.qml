@@ -16,17 +16,17 @@ Panel {
         open: root.opened
         focusTarget: keys
         contentWidth: fittedContentWidth(Style.space(480))
-        contentHeight: fittedContentHeight(card.implicitHeight,Style.space(680))
+        contentHeight: fittedContentHeight(cardLoader.height,Style.space(680))
         PanelKeyCatcher {
             id: keys
             anchors.fill: parent
-            blocked: card.inputFocused
+            blocked: cardLoader.item ? cardLoader.item.inputFocused : false
             onCloseRequested: root.widget.close()
             Flickable {
                 id: scroll
                 anchors.fill:parent
                 contentWidth:width
-                contentHeight:card.implicitHeight
+                contentHeight:cardLoader.height
                 clip:true
                 boundsBehavior:Flickable.StopAtBounds
                 Controls.ScrollBar.vertical: Controls.ScrollBar {}
@@ -35,7 +35,23 @@ Panel {
                     function onSettingsModeChanged() { scroll.contentY = 0 }
                     function onOpenedChanged() { if (root.widget.opened) scroll.contentY = 0 }
                 }
-                AircraftCard { id:card; settingsMode:root.widget.settingsMode; changeSquawks:root.widget.setSquawks; onSettingsRequested:root.widget.openSettings(); width:scroll.width; svc:root.widget.svc; panelOpen:root.opened; changeRange:root.widget.setRange; changeTracking:root.widget.setTracking; alertLabel:root.widget.alertLabel; alertColor:root.widget.alertColor }
+                Loader {
+                    id: cardLoader
+                    active: root.opened
+                    width: scroll.width
+                    height: item ? item.implicitHeight : 0
+                    sourceComponent: AircraftCard {
+                        settingsMode: root.widget.settingsMode
+                        changeSquawks: root.widget.setSquawks
+                        onSettingsRequested: root.widget.openSettings()
+                        svc: root.widget.svc
+                        panelOpen: root.opened
+                        changeRange: root.widget.setRange
+                        changeTracking: root.widget.setTracking
+                        alertLabel: root.widget.alertLabel
+                        alertColor: root.widget.alertColor
+                    }
+                }
             }
         }
     }

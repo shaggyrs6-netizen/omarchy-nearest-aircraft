@@ -46,6 +46,7 @@ ShellRoot {
  mouseClick(widget,widget.width/2,widget.height/2,Qt.LeftButton)
  compare(svc.visitedTracker,"adsbx")
  verify(!widget.opened)
+ verify(findChild(widget,"watchTails") === null)
  mouseClick(widget,widget.width/2,widget.height/2,Qt.RightButton)
  tryCompare(widget,"opened",true,3000)
  var fr=findChild(widget,"openFr24");verify(fr!==null);verify(fr.visible);verify(fr.enabled)
@@ -85,7 +86,7 @@ ShellRoot {
  compare(svc.defaultTracker,"flightaware")
  verify(!card.changeTracking("N3200X/","radarbox"))
  compare(svc.defaultTracker,"flightaware")
- tryVerify(function(){return svc.fresh},5000)
+ tryVerify(function(){return svc.fresh && svc.aircraft.watched === true},5000)
  var alert = Object.assign({}, svc.aircraft, {watched:true})
  svc.data = Object.assign({}, svc.data, {nearest:alert})
  compare(widget.alertLabel,"Watched aircraft")
@@ -96,6 +97,7 @@ ShellRoot {
  mouseClick(widget,widget.width/2,widget.height/2,Qt.LeftButton)
  compare(svc.visitedTracker,"flightaware")
  tryCompare(widget,"opened",false)
+ tryVerify(function(){return findChild(widget,"watchTails") === null})
  svc.data = {state:"empty", configured:true, nearest:null}
  svc.visitedTracker = ""
  mouseClick(widget,widget.width/2,widget.height/2,Qt.LeftButton)
@@ -103,6 +105,8 @@ ShellRoot {
  tryCompare(widget,"settingsMode",false)
  compare(svc.visitedTracker,"")
  svc.data = Object.assign({}, previousData, {nearest:alert})
+ ad=findChild(widget,"openDefaultTracker")
+ card=findChild(widget,"aircraftCard")
  verify(ad.visible)
  verify(ad.text.includes("FlightAware"))
  verify(card.changeRange(1));tryCompare(svc,"rangeMiles",1,3000)

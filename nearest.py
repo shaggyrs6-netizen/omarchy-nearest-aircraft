@@ -26,6 +26,7 @@ MAX_RANGE_MILES = 100
 MAX_BODY = 2_000_000
 MAX_HEADERS = 65_536
 MAX_LOCAL_STATE = 4096
+MAX_WATCH_LIST = 511
 PR_SET_PDEATHSIG = 1
 stopping = False
 DEFAULT_STATE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home()/'.local/state'))) / 'nearest-aircraft'
@@ -307,17 +308,17 @@ def state(code,configured=False,**extra):
 def emit(data):
     print(json.dumps(data,allow_nan=False,separators=(',',':')),flush=True)
 
-def demo_snapshot(kind='airline'):
+def demo_snapshot(kind='airline', watch_tails=()):
     now=time.time();row={'hex':'abc123','lat':36.201,'lon':-86.51,'seen_pos':0,'r':'N123AB','t':'B738','flight':'BAW232','alt_baro':31000}
     if kind=='ga':row.update(flight='N123AB',t='C172',alt_baro=3200)
     if kind=='military':row.update(flight='RCH123',r='10-0215',t='C17',dbFlags=1,alt_baro=18000)
-    result,_=nearest({'now':now*1000,'ac':[row]},{'latitude':36.2,'longitude':-86.52},now)
+    result,_=nearest({'now':now*1000,'ac':[row]},{'latitude':36.2,'longitude':-86.52},now,watch_tails=watch_tails)
     return dict(state('ok',True),nearest=result,demo=True)
 
 def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_codes=EMERGENCY_CODES):
     if demo:
-        emit(demo_snapshot())
-        while True:time.sleep(INTERVAL);emit(demo_snapshot())
+        emit(demo_snapshot(watch_tails=watch_tails))
+        while True:time.sleep(INTERVAL);emit(demo_snapshot(watch_tails=watch_tails))
     directory=private_directory(directory)
     fd=os.open(directory/'worker.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
     try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -365,11 +366,10 @@ def main():
     parser.add_argument('--quiet-control', action='store_true')
     parser.add_argument('--range-miles',type=int,default=DEFAULT_RANGE_MILES,choices=range(1,MAX_RANGE_MILES+1),metavar='1..100')
     parser.add_argument('--kind',choices=['airline','ga','military'],default='airline')
-    parser.add_argument('--watch-tails',default='')
+    parser.add_argument('--watch-stdin',action='store_true',help='read one watchlist line from stdin at worker startup')
     parser.add_argument('--squawk-codes',default=','.join(EMERGENCY_CODES))
     args=parser.parse_args()
     squawk_codes=set(args.squawk_codes.split(',')) & set(EMERGENCY_CODES)
-    watch_tails={tail for token in args.watch_tails[:511].split(',') if (tail:=identifier(token,24))}
     if args.command=='demo':emit(demo_snapshot(args.kind));return 0
     if args.command=='control':
         try:
@@ -385,7 +385,15 @@ def main():
             return 1
     if not args.demo:
         signal.signal(signal.SIGTERM, request_stop)
-    try:return worker(args.state_dir,args.demo,args.range_miles,watch_tails,squawk_codes)
+    try:
+        watch_tails = ()
+        if args.watch_stdin:
+            with sys.stdin.buffer as stream:
+                line = stream.readline(MAX_WATCH_LIST + 2)
+            if len(line) > MAX_WATCH_LIST + 1 or not line.endswith(b'\n'):
+                raise ValueError('invalid_watchlist')
+            watch_tails = {tail for token in line[:-1].decode('ascii').split(',') if (tail := identifier(token,24))}
+        return worker(args.state_dir,args.demo,args.range_miles,watch_tails,squawk_codes)
     except (OSError,ValueError,TypeError,OverflowError):emit(state('error'));return 1
 
 if __name__=='__main__':

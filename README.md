@@ -95,7 +95,7 @@ Disabling stops the owned worker. Removing the plugin does not intentionally del
 
 ## Privacy and network access
 
-Your exact location is saved in `home.json` under `$XDG_STATE_HOME/nearest-aircraft` (normally `~/.local/state/nearest-aircraft`), with directory permissions 0700 and file permissions 0600. Range and demo settings are stored in Omarchy's normal shell settings.
+Your exact location is saved in `home.json` under `$XDG_STATE_HOME/nearest-aircraft` (normally `~/.local/state/nearest-aircraft`), with directory permissions 0700 and file permissions 0600. Range, demo and watchlist settings are stored in Omarchy's normal shell settings. The worker receives the watchlist over a private stdin pipe.
 
 ADSB.fi receives a search centre **rounded to 0.1 degrees** and an expanded radius covering your selected circle. This still reveals an approximate area to the provider. Exact distance ranking happens locally. No raw aircraft responses, location history or analytics are saved. Opening a tracking link contacts the chosen external site through your browser.
 
