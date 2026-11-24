@@ -43,6 +43,7 @@ Panel {
                     sourceComponent: AircraftCard {
                         settingsMode: root.widget.settingsMode
                         changeSquawks: root.widget.setSquawks
+                        changeAlertRange: root.widget.setAlertRange
                         onSettingsRequested: root.widget.openSettings()
                         svc: root.widget.svc
                         panelOpen: root.opened

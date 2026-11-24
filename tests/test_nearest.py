@@ -112,40 +112,64 @@ class NearestTests(unittest.TestCase):
     def test_non_icao_address_uses_base_adsbx_link(self):
         a,_=n.nearest(feed(row(hex='~abc123')),HOME,NOW)
         self.assertEqual(a['adsbxUrl'],'https://globe.adsbexchange.com/')
+    def test_nashville_atc_hints_require_local_position_and_flight_path(self):
+        for expected, aircraft in (
+            ('approachEast', row(lon=-86.50, track=245, baro_rate=-700)),
+            ('approachWest', row(lon=-86.85, track=300, baro_rate=700)),
+            ('tower', row(lat=36.155, lon=-86.6782, alt_baro=1050, track=180, baro_rate=-500)),
+            ('nashville', row(lon=-86.50, track=65, baro_rate=-700)),
+            ('nashville', row(lat=36.25, lon=-86.60, track=205, baro_rate=-700)),
+            ('nashville', row(lon=-86.50, track=245, baro_rate=None)),
+            ('nashville', row(lon=-86.50, track=245, baro_rate=10**400)),
+        ):
+            with self.subTest(expected=expected, aircraft=aircraft):
+                selected, _ = n.nearest(feed(aircraft), HOME, NOW, 40)
+                self.assertEqual(selected['atcHint'], expected)
+                self.assertNotIn('_radio', selected)
+
+    def test_memphis_hint_is_limited_to_conservative_local_high_airspace(self):
+        self.assertEqual(n.atc_hint(36.21, -86.52, 33000, None, None), 'memphisSmyrna')
+        self.assertEqual(n.atc_hint(36.21, -86.52, 38000, None, None), 'memphisClarksville')
+        self.assertEqual(n.atc_hint(36.21, -86.52, 35000, None, None), 'memphis')
+        self.assertEqual(n.atc_hint(36.38, -86.90, 33000, None, None), 'memphis')
+        self.assertEqual(n.atc_hint(37.0, -86.52, 33000, None, None), '')
+        self.assertEqual(n.atc_hint(36.21, -86.52, 19000, None, None), 'nashville')
+        self.assertEqual(n.atc_hint(36.21, -86.52, None, None, None), 'nashville')
+
     def test_tracking_links_are_public_pages(self):
         a,_=n.nearest(feed(row()),HOME,NOW)
         self.assertEqual(a['fr24Url'],'https://www.flightradar24.com/data/aircraft/n123ab')
         self.assertEqual(a['adsbxUrl'],'https://globe.adsbexchange.com/?icao=abc123')
     def test_emergency_priority_and_watchlist_use_every_eligible_aircraft(self):
         ordinary = row(r='N123AB', squawk='1200')
-        watched = row(hex='def456', lat=36.215, r='n3200x', flight='BAW232')
+        watched = row(hex='def456', lat=36.215, r='n456zz', flight='BAW232')
         for code in ('7500', '7600', '7700', 7700):
             with self.subTest(code=code):
                 emergency = row(hex='abc456', lat=36.218, squawk=code)
-                result, _ = n.nearest(feed(ordinary, watched, emergency), HOME, NOW, 2, {'N3200X'})
+                result, _ = n.nearest(feed(ordinary, watched, emergency), HOME, NOW, 2, {'N456ZZ'})
                 self.assertEqual(result['hex'], emergency['hex'])
                 self.assertEqual(result['emergencySquawk'], str(code))
-        result, _ = n.nearest(feed(ordinary, watched), HOME, NOW, 2, {'N3200X'})
-        self.assertEqual(result['tail'], 'N3200X')
+        result, _ = n.nearest(feed(ordinary, watched), HOME, NOW, 2, {'N456ZZ'})
+        self.assertEqual(result['tail'], 'N456ZZ')
         self.assertTrue(result['watched'])
         self.assertEqual(result['emergencySquawk'], '')
 
     def test_squawk_selection_does_not_disable_tail_watch(self):
         ordinary = row()
-        watched = row(hex='def456', lat=36.215, r='N3200X', squawk='7600')
+        watched = row(hex='def456', lat=36.215, r='N456ZZ', squawk='7600')
         emergency = row(hex='123abc', lat=36.218, squawk='7700')
         for codes in ((), ('7500', '7600')):
             with self.subTest(codes=codes):
-                result, _ = n.nearest(feed(ordinary, watched, emergency), HOME, NOW, 2, {'N3200X'}, codes)
+                result, _ = n.nearest(feed(ordinary, watched, emergency), HOME, NOW, 2, {'N456ZZ'}, codes)
                 self.assertTrue(result['watched'])
                 self.assertEqual(result['emergencySquawk'], '7600' if codes else '')
 
     def test_watch_and_emergency_exclude_ground_stale_and_out_of_range(self):
-        ordinary = row(flight='N3200X', squawk='1200')
-        ground = row(hex='def456', r='N3200X', squawk='7500', alt_baro='ground')
-        stale = row(hex='abc456', r='N3200X', squawk='7600', seen_pos=21)
-        distant = row(hex='def123', r='N3200X', squawk='7700', lat=36.25)
-        result, _ = n.nearest(feed(ordinary, ground, stale, distant), HOME, NOW, 1, {'N3200X'})
+        ordinary = row(flight='N456ZZ', squawk='1200')
+        ground = row(hex='def456', r='N456ZZ', squawk='7500', alt_baro='ground')
+        stale = row(hex='abc456', r='N456ZZ', squawk='7600', seen_pos=21)
+        distant = row(hex='def123', r='N456ZZ', squawk='7700', lat=36.25)
+        result, _ = n.nearest(feed(ordinary, ground, stale, distant), HOME, NOW, 1, {'N456ZZ'})
         self.assertEqual(result['hex'], ordinary['hex'])
         self.assertFalse(result['watched'])
         self.assertEqual(result['emergencySquawk'], '')
@@ -153,6 +177,40 @@ class NearestTests(unittest.TestCase):
     def test_bearing_distance(self):
         metres,bearing,direction=n.distance_bearing(0,0,0,1)
         self.assertAlmostEqual(metres,111195,delta=1);self.assertEqual(direction,'E');self.assertAlmostEqual(bearing,90)
+
+    def test_any_range_returns_only_requested_fresh_airborne_matches(self):
+        watched = row(hex='def456', lat=45, r='N456ZZ', squawk='7700')
+        emergency = row(hex='abc456', lat=50, squawk='7600')
+        other = row(hex='def123', lat=38)
+        ground = row(hex='def124', lat=38, r='N456ZZ', squawk='7600', alt_baro='ground')
+        stale = row(hex='def125', lat=38, r='N456ZZ', squawk='7600', seen_pos=21)
+        snapshot = feed(watched, emergency, other, ground, stale)
+        local, _ = n.nearest(snapshot, HOME, NOW, 20, {'N456ZZ'})
+        self.assertIsNone(local)
+        tail_match, _ = n.nearest(snapshot, HOME, NOW, 20, {'N456ZZ'}, (), alerts_only=True)
+        squawk_match, _ = n.nearest(snapshot, HOME, NOW, 20, (), ('7600',), alerts_only=True)
+        self.assertEqual(tail_match['hex'], watched['hex'])
+        self.assertEqual(tail_match['emergencySquawk'], '')
+        self.assertGreater(tail_match['distanceMi'], 250)
+        self.assertEqual(squawk_match['hex'], emergency['hex'])
+        self.assertFalse(squawk_match['watched'])
+        self.assertEqual(min([tail_match, squawk_match], key=n.alert_priority), squawk_match)
+
+    def test_wide_queries_are_independent_and_registrations_stay_out_of_curl_argv(self):
+        tails, codes = {'N456ZZ', 'N123AB'}, {'7500', '7700'}
+        self.assertEqual(list(n.wide_alert_queries(tails, codes, False, False)), [])
+        tail_requests = list(n.wide_alert_queries(tails, codes, True, False))
+        self.assertEqual(len(tail_requests), 1)
+        url, requested_tails, requested_codes = tail_requests[0]
+        self.assertEqual((requested_tails, requested_codes), (tails, ()))
+        self.assertTrue(url.endswith('/registration/N123AB,N456ZZ'))
+        with patch.object(n, 'read_curl', return_value=b'HTTP/2 200\r\n\r\n{}') as curl:
+            n.fetch_url(url, None)
+        command, _, request = curl.call_args.args
+        self.assertNotIn('N456ZZ', ' '.join(command))
+        self.assertIn(b'N456ZZ', request)
+        squawk_requests = list(n.wide_alert_queries(tails, codes, False, True))
+        self.assertEqual([url.rsplit('/', 1)[-1] for url, _, _ in squawk_requests], ['7500', '7700'])
     def test_horizontal_distance_not_altitude_selects_nearest(self):
         a,_=n.nearest(feed(row(lat=36.201,alt_baro=35000),row(hex='def456',lat=36.21,alt_baro=1000)),HOME,NOW)
         self.assertEqual(a['hex'],'abc123')

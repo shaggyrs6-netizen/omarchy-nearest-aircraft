@@ -111,6 +111,11 @@ BarWidget {
         var next = Object.assign({}, root.settings, {squawkEnabled:enabled, squawkCodes:Safe.squawkCodes(codes).join(",")})
         return root.bar.shell.updateEntryInline(root.moduleName, next) === true
     }
+    function setAlertRange(key, anyRange) {
+        if ((key !== "watchAnyRange" && key !== "squawkAnyRange") || !root.bar || !root.bar.shell) return false
+        var next = Object.assign({}, root.settings, {[key]: anyRange === true})
+        return root.bar.shell.updateEntryInline(root.moduleName, next) === true
+    }
     function open() { settingsMode = false; panel.controller.show() }
     function openSettings() { settingsMode = true; panel.controller.show() }
     function toggleView(showSettings) {

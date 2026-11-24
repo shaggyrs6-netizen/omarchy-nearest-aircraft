@@ -1,6 +1,6 @@
 # Nearest Aircraft
 
-![Nearest Aircraft — Civil + Military, adjustable 1–100 mile range, flight or tail number, Flightradar24 and ADS-B Exchange links. Promotional example.](preview.png)
+![Nearest Aircraft — LiveATC and flexible alert ranges. Promotional artwork.](preview-v0.2.0.png)
 
 A compact Omarchy bar widget showing the nearest **reported airborne aircraft** to a location you set locally.
 
@@ -10,6 +10,7 @@ A compact Omarchy bar widget showing the nearest **reported airborne aircraft** 
 - Search range from **1 to 100 statute miles**, default 70 miles.
 - Airline flight numbers where reliably derivable, such as `BAW232 → BA232`; registrations preferred for GA and provider-flagged military aircraft.
 - Red emergency squawk alerts, an orange tail-number watchlist and a selectable tracker that opens in your default browser.
+- Separate range controls for watched tails and emergency squawks, plus LiveATC links for the Nashville area.
 - Theme-aware compact readout, local home settings, pause/resume and demonstration mode.
 - Live aircraft data from [ADSB.fi](https://adsb.fi/), refreshed every ten seconds while configured and enabled.
 
@@ -22,6 +23,12 @@ Captured in demo mode with synthetic aircraft.
 | ![Red emergency alert in the bar](screenshots/nearest-aircraft-emergency.png) | ![Orange watchlist match in the bar](screenshots/nearest-aircraft-watchlist.png) |
 
 [Settings and tracker selection](screenshots/nearest-aircraft-settings.png) · [Emergency squawk in aircraft details](screenshots/nearest-aircraft-emergency-details.png)
+
+| Nashville approach and departure | Memphis Center sector estimate |
+| --- | --- |
+| ![Nashville East shows the likely frequency and a LiveATC button](screenshots/liveatc-nashville-east.png) | ![Smyrna High shows 118.875 MHz and a no matching feed message](screenshots/liveatc-memphis-center.png) |
+
+[Independent alert-range settings](screenshots/alert-range-settings.png) · [Distant watched aircraft](screenshots/alert-range-watchlist.png) · [Distant emergency squawk](screenshots/alert-range-squawk.png)
 
 ## Requirements
 
@@ -71,9 +78,17 @@ omarchy bar set shaggyrs6.nearest-aircraft rangeMiles 10 --json
 
 In **Settings**, turn **Emergency squawk alerts** on or off and choose which codes to flag. All three codes are selected by default. Turning alerts off keeps your selections for next time.
 
-Enter one or more registrations under **Watched tail numbers**, separated by commas, and click **Apply**. Matches use the feed's registration. The bar shows red for squawk 7500, 7600 or 7700, then orange for a watchlist match, then its normal nearest-aircraft readout. When multiple aircraft qualify at the same priority, the closest one is shown. Alerts apply to fresh airborne reports within the saved range and clear as reports leave range or expire.
+Enter one or more registrations under **Watched tail numbers**, separated by commas, and click **Apply**. Matches use the feed's registration. The bar shows red for a selected emergency squawk, then orange for a watchlist match, then its normal nearest-aircraft readout. When multiple aircraft qualify at the same priority, the closest one is shown.
+
+**Watched tail range** and **Squawk alert range** can each use **Selected range** or **Any range**. Selected range is the default and follows your saved search radius. Any range checks for matching fresh airborne reports throughout ADSB.fi coverage. Ordinary nearest-aircraft results still use your saved radius.
 
 The **Default tracker** menu saves your choice between ADS-B Exchange, Flightradar24, AirNav Radar (RadarBox) and FlightAware. ADS-B Exchange is the default. Left-click an active aircraft in the bar to open your choice in the default browser. Right-click opens the aircraft details. The watchlist and tracker choice are saved in Omarchy's shell settings.
+
+## Listen on LiveATC
+
+For aircraft near Nashville, right-click the widget for a LiveATC shortcut. The popup can suggest a likely Tower, Approach/Departure or Memphis Center frequency based on the aircraft's reported position, altitude and flight path. When the Memphis sector match is uncertain, the popup keeps the general Center link and leaves the frequency unknown.
+
+The button opens a [Nashville](https://www.liveatc.net/search/?icao=kbna) or [Memphis Center](https://www.liveatc.net/search/?icao=zme) directory page in your browser. The Smyrna High and Clarksville Ultra High coverage notes reflect a manual feed-directory check. Controller assignments can differ from the estimates, and a live Memphis handoff has not been verified.
 
 ## Pause, disable or remove
 
@@ -98,6 +113,8 @@ Disabling stops the owned worker. Removing the plugin does not intentionally del
 Your exact location is saved in `home.json` under `$XDG_STATE_HOME/nearest-aircraft` (normally `~/.local/state/nearest-aircraft`), with directory permissions 0700 and file permissions 0600. Range, demo and watchlist settings are stored in Omarchy's normal shell settings. The worker receives the watchlist over a private stdin pipe.
 
 ADSB.fi receives a search centre **rounded to 0.1 degrees** and an expanded radius covering your selected circle. This still reveals an approximate area to the provider. Exact distance ranking happens locally. No raw aircraft responses, location history or analytics are saved. Opening a tracking link contacts the chosen external site through your browser.
+
+Selecting **Any range** for the watchlist sends your saved registrations to ADSB.fi to look them up. **Selected range** checks those registrations locally. Any-range squawk requests send the selected emergency codes.
 
 One Python worker is shared across bar instances. A lock and persisted request budget prevent duplicate polling during reloads. Requests use fixed HTTPS sources, connection/overall timeouts, response-size limits, backoff and a three-failure circuit breaker. Provider 4xx restrictions stop automatic requests; manual retry preserves the provider cooldown.
 
@@ -132,6 +149,6 @@ The first command runs Python selection/privacy/range tests, UI safety checks an
 
 ## Licence and attribution
 
-Source: [MIT](LICENSE). See [NOTICES.md](NOTICES.md). The preview is AI-generated promotional artwork with a labelled fictional example, not an exact screenshot.
+Source: [MIT](LICENSE). See [NOTICES.md](NOTICES.md). The preview is AI-generated promotional artwork. Widget screenshots use simulated aircraft.
 
 Aircraft data is provided by [ADSB.fi](https://adsb.fi/). Its [open-data rules](https://github.com/adsbfi/opendata) allow personal, non-commercial use and require attribution; those service rules are separate from the source-code licence. No live feed dataset is redistributed here. Flightradar24, ADS-B Exchange, Omarchy and airline names belong to their respective owners; no endorsement is implied.

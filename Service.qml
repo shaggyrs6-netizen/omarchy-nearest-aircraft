@@ -15,6 +15,8 @@ Item {
     readonly property string defaultTracker: Safe.tracker(settings ? settings.defaultTracker : "")
     readonly property bool squawkEnabled: !settings || settings.squawkEnabled !== false
     readonly property var squawkCodes: Safe.squawkCodes(settings ? settings.squawkCodes : undefined)
+    readonly property bool watchAnyRange: settings !== null && settings.watchAnyRange === true
+    readonly property bool squawkAnyRange: settings !== null && settings.squawkAnyRange === true
     readonly property string activeSquawkCodes: squawkEnabled ? squawkCodes.join(",") : ""
     property bool intentionalRestart: false
     property bool ready: false
@@ -30,7 +32,9 @@ Item {
     readonly property var extraArguments: stateDirectory ? ["--state-dir", stateDirectory] : []
     property var data: ({state:"loading", configured:false, nearest:null})
     property double now: Date.now() / 1000
-    readonly property bool fresh: Safe.current(data, now) && Safe.number(data.nearest.distanceMi) && data.nearest.distanceMi <= rangeMiles
+    readonly property bool fresh: Safe.current(data, now) && Safe.number(data.nearest.distanceMi) && (data.nearest.distanceMi <= rangeMiles
+        || (watchAnyRange && data.nearest.watched === true)
+        || (squawkAnyRange && activeSquawkCodes !== "" && squawkCodes.includes(data.nearest.emergencySquawk)))
     readonly property var aircraft: fresh ? data.nearest : null
     property int crashCount: 0
     property bool shuttingDown: false
@@ -79,6 +83,8 @@ Item {
     onDemoChanged: restartReader()
     onRangeMilesChanged: restartReader()
     onWatchTailsChanged: restartReader()
+    onWatchAnyRangeChanged: restartReader()
+    onSquawkAnyRangeChanged: restartReader()
     onActiveSquawkCodesChanged: restartReader()
     Component.onDestruction: { root.shuttingDown = true; reader.running = false; controller.running = false }
 
@@ -89,7 +95,10 @@ Item {
         id: reader
         stdinEnabled: true
         onStarted: reader.write(root.watchTails + "\n")
-        command: ["python3", "-B", root.helper, "worker", "--range-miles", String(root.rangeMiles), "--watch-stdin", "--squawk-codes=" + root.activeSquawkCodes].concat(root.extraArguments).concat(root.demo ? ["--demo"] : [])
+        command: ["python3", "-B", root.helper, "worker", "--range-miles", String(root.rangeMiles), "--watch-stdin", "--squawk-codes=" + root.activeSquawkCodes]
+            .concat(root.watchAnyRange ? ["--watch-any-range"] : [])
+            .concat(root.squawkAnyRange ? ["--squawk-any-range"] : [])
+            .concat(root.extraArguments).concat(root.demo ? ["--demo"] : [])
         running: false
         stdout: SplitParser { splitMarker:"\n"; onRead:function(line) { root.apply(line) } }
         onExited: function(code, status) {
@@ -130,6 +139,7 @@ Item {
                 fresh:root.fresh, demo:root.demo, rangeMiles:root.rangeMiles, workerRunning:reader.running,
                 watchlistCount:root.watchTails ? root.watchTails.split(",").length : 0, defaultTracker:root.defaultTracker,
                 squawkEnabled:root.squawkEnabled, squawkCodes:root.squawkCodes,
+                watchAnyRange:root.watchAnyRange, squawkAnyRange:root.squawkAnyRange,
                 displayId:root.aircraft ? Safe.plain(root.aircraft.displayId,24) : "",
                 altitudeFt:root.aircraft ? root.aircraft.altitudeFt : null})
         }

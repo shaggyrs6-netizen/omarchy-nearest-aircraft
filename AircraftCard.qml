@@ -11,6 +11,8 @@ ColumnLayout {
     property var svc: null
     property bool settingsMode: false
     property var changeSquawks: null
+    property var changeAlertRange: null
+    property bool alertRangeError: false
     property bool squawkError: false
     signal settingsRequested()
     function saveSquawks(enabled, codes) {
@@ -29,10 +31,12 @@ ColumnLayout {
     property string rangeError: ""
     readonly property string savedRangeText: svc ? String(svc.rangeMiles) : ""
     onSavedRangeTextChanged: if (rangeInput && !rangeInput.activeFocus) rangeInput.text = savedRangeText
-    readonly property bool inputFocused: latitude.activeFocus || longitude.activeFocus || rangeInput.activeFocus || tailInput.activeFocus || trackerPicker.popupOpen
+    readonly property bool inputFocused: latitude.activeFocus || longitude.activeFocus || rangeInput.activeFocus || tailInput.activeFocus || trackerPicker.popupOpen || watchRangePicker.popupOpen || squawkRangePicker.popupOpen
     readonly property bool configured: svc && svc.data.configured === true
     readonly property bool fresh: svc && svc.fresh
     readonly property var aircraft: fresh ? svc.aircraft : null
+    readonly property string atcHint: root.aircraft ? Safe.atcHint(root.aircraft.atcHint) : ""
+    readonly property bool liveAtcFeedUnlisted: atcHint === "memphisSmyrna" || atcHint === "memphisClarksville"
     readonly property bool demo: svc && svc.demo
     readonly property bool showHome: !demo && (editHome || !configured)
     spacing: Style.space(10)
@@ -43,6 +47,7 @@ ColumnLayout {
         rangeError = ""
         trackingError = false
         squawkError = false
+        alertRangeError = false
         tailInput.text = savedTails
         rangeInput.text = savedRangeText
         if (!panelOpen) {
@@ -106,6 +111,37 @@ ColumnLayout {
         Ui.Button { objectName:"openFr24"; visible:trackerPicker.value !== "fr24"; Layout.fillWidth:true; text:strings.t("links.fr24"); bordered:true; focusable:true; enabled:root.fresh; onClicked:if(svc) svc.visit("fr24") }
         Ui.Button { objectName:"openAdsbx"; visible:trackerPicker.value !== "adsbx"; Layout.fillWidth:true; text:strings.t("links.adsbx"); bordered:true; focusable:true; enabled:root.fresh; onClicked:if(svc) svc.visit("adsbx") }
     }
+    PlainText {
+        visible:!root.settingsMode && root.atcHint !== ""
+        Layout.fillWidth:true
+        objectName:"atcFrequency"
+        text: root.atcHint ? strings.t("atc." + root.atcHint) : ""
+        font.pixelSize:Style.font.bodySmall
+        opacity:.72
+    }
+    PlainText {
+        objectName:"liveAtcCoverage"
+        visible:!root.settingsMode && root.liveAtcFeedUnlisted
+        Layout.fillWidth:true
+        text:strings.t("atc.liveatcUnlisted")
+        font.pixelSize:Style.font.bodySmall
+        opacity:.72
+    }
+    Ui.Button {
+        objectName:"openLiveAtc"
+        visible:!root.settingsMode && root.atcHint !== ""
+        Layout.fillWidth:true
+        text:strings.t(root.liveAtcFeedUnlisted ? "links.liveatcBrowse" : "links.liveatc")
+        bordered:true
+        focusable:true
+        onClicked:Qt.openUrlExternally(Safe.liveAtcUrl(root.atcHint))
+    }
+    PlainText {
+        visible:!root.settingsMode && svc && svc.data.wideAlertUnavailable === true
+        Layout.fillWidth:true
+        text:strings.t("alerts.wideUnavailable")
+        font.pixelSize:Style.font.bodySmall
+    }
     Ui.Button {
         visible:!root.settingsMode
         Layout.fillWidth:true
@@ -156,6 +192,16 @@ ColumnLayout {
                 }
             }
         }
+        Ui.Dropdown {
+            id:squawkRangePicker
+            objectName:"squawkRange"
+            Layout.fillWidth:true
+            label:strings.t("alerts.squawkRange")
+            value:svc && svc.squawkAnyRange ? "any" : "local"
+            options:[{value:"local", label:strings.t("alerts.selectedRange")}, {value:"any", label:strings.t("alerts.anyRange")}]
+            enabled:svc !== null && svc.squawkEnabled && root.changeAlertRange !== null
+            onChanged:function(value) { root.alertRangeError = !root.changeAlertRange("squawkAnyRange", value === "any") }
+        }
         PlainText { Layout.fillWidth:true; visible:root.squawkError; text:strings.t("alerts.error") }
         RowLayout {
             Layout.fillWidth:true
@@ -185,6 +231,18 @@ ColumnLayout {
             }
         }
         PlainText { Layout.fillWidth:true; visible:root.trackingError; text:strings.t("watch.error") }
+        Ui.Dropdown {
+            id:watchRangePicker
+            objectName:"watchRange"
+            Layout.fillWidth:true
+            label:strings.t("alerts.watchRange")
+            value:svc && svc.watchAnyRange ? "any" : "local"
+            options:[{value:"local", label:strings.t("alerts.selectedRange")}, {value:"any", label:strings.t("alerts.anyRange")}]
+            enabled:svc !== null && root.changeAlertRange !== null
+            onChanged:function(value) { root.alertRangeError = !root.changeAlertRange("watchAnyRange", value === "any") }
+        }
+        PlainText { Layout.fillWidth:true; text:strings.t("alerts.watchPrivacy"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
+        PlainText { Layout.fillWidth:true; visible:root.alertRangeError; text:strings.t("alerts.rangeError") }
     }
     PlainText { Layout.fillWidth:true; text:strings.t("coverage"); font.pixelSize:Style.font.bodySmall; opacity:.72 }
     RowLayout {

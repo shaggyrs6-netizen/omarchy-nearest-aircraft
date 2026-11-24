@@ -54,3 +54,13 @@ function squawkCodes(value) {
     var selected = value.split(",")
     return supported.filter(function(code) { return selected.includes(code) })
 }
+
+function atcHint(value) {
+    return ["nashville", "tower", "approachEast", "approachWest", "memphis", "memphisSmyrna", "memphisClarksville"].includes(value) ? value : ""
+}
+
+function liveAtcUrl(hint) {
+    return ["memphis", "memphisSmyrna", "memphisClarksville"].includes(hint)
+        ? "https://www.liveatc.net/search/?icao=zme"
+        : "https://www.liveatc.net/search/?icao=kbna"
+}

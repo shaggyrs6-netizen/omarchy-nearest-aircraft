@@ -58,6 +58,107 @@ def distance_bearing(lat, lon, target_lat, target_lon):
     directions=('N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW')
     return metres,bearing,directions[int((bearing+11.25)/22.5)%16]
 
+# NWS Memphis CWSU sector outlines (turbulence high/ultra-high KML).
+# VHF frequencies: FAA Southeast Chart Supplement effective 29 Oct 2026,
+# Memphis Center Nashville RCAG, cross-checked against the SFDPS sector display.
+MEMPHIS_SECTOR_62 = (
+    (-85.58333, 36.90000),
+    (-85.40000, 36.18333),
+    (-85.32083, 35.82500),
+    (-85.28333, 35.65000),
+    (-86.00000, 35.51667),
+    (-86.94194, 35.34389),
+    (-87.00000, 35.33333),
+    (-87.23278, 35.45528),
+    (-87.50750, 35.81028),
+    (-87.46833, 36.17917),
+    (-87.51667, 36.25000),
+    (-87.30000, 36.25000),
+    (-87.00000, 36.36667),
+    (-85.58333, 36.90000),
+)
+MEMPHIS_SECTOR_61 = (
+    (-87.63333, 37.39167),
+    (-87.39722, 37.27500),
+    (-86.91667, 37.28889),
+    (-86.48333, 37.30000),
+    (-86.38806, 37.30000),
+    (-86.15000, 37.30000),
+    (-86.00000, 37.19444),
+    (-85.96361, 37.16667),
+    (-85.58333, 36.90000),
+    (-85.40000, 36.18333),
+    (-85.32083, 35.82500),
+    (-85.28333, 35.65000),
+    (-86.00000, 35.51667),
+    (-86.94194, 35.34389),
+    (-87.00000, 35.33333),
+    (-87.23278, 35.45528),
+    (-87.50750, 35.81028),
+    (-87.46833, 36.17917),
+    (-87.51667, 36.25000),
+    (-88.03861, 37.00972),
+    (-87.63333, 37.39167),
+)
+
+
+def inside_sector(lat, lon, outline):
+    # Equirectangular distances around Nashville. Skip positions within
+    # roughly 5 NM of any edge where a communications handoff may differ.
+    inside = False
+    for (lon_a, lat_a), (lon_b, lat_b) in zip(outline, outline[1:]):
+        if (lat_a > lat) != (lat_b > lat):
+            crossing = lon_a + (lon_b - lon_a) * (lat - lat_a) / (lat_b - lat_a)
+            if lon < crossing:
+                inside = not inside
+        x, y = (lon_a - lon) * 0.81, lat_a - lat
+        dx, dy = (lon_b - lon_a) * 0.81, lat_b - lat_a
+        along = max(0, min(1, -(x * dx + y * dy) / (dx * dx + dy * dy)))
+        if math.hypot(x + along * dx, y + along * dy) <= 5 / 60:
+            return False
+    return inside
+
+
+def atc_hint(lat, lon, baro, track, vertical_rate):
+    # A local listening heuristic, not a sector map. The 30 NM circle around
+    # KBNA is inside the FAA's 29 Oct 2026 Memphis high-center boundary.
+    # FAA Airspace Boundary service: IDENT=ZME, LEVEL_=U.
+    distance, radial, _ = distance_bearing(36.1263, -86.6782, lat, lon)
+    nautical_miles = distance / 1852
+    if nautical_miles > 30:
+        return ''
+    if not number(baro):
+        return 'nashville'
+    if 20000 <= baro <= 60000:
+        # Use interior flight levels, leaving room around both published
+        # altitude transitions and differences between source datasets.
+        if 25000 <= baro <= 33500 and inside_sector(lat, lon, MEMPHIS_SECTOR_62):
+            return 'memphisSmyrna'
+        if baro >= 36000 and inside_sector(lat, lon, MEMPHIS_SECTOR_61):
+            return 'memphisClarksville'
+        return 'memphis'
+    if not (number(track) and 0 <= track < 360 and number(vertical_rate) and 300 <= abs(vertical_rate) <= 8000):
+        return 'nashville'
+
+    _, inbound, _ = distance_bearing(lat, lon, 36.1263, -86.6782)
+    expected_track = inbound if vertical_rate < 0 else (inbound + 180) % 360
+    if abs((track - expected_track + 180) % 360 - 180) > 55:
+        return 'nashville'
+
+    if nautical_miles <= 4 and 750 <= baro <= 1500:
+        return 'tower'
+    if not (5 <= nautical_miles and 2000 <= baro <= 9000):
+        return 'nashville'
+
+    # FAA KBNA ILS/LOC RWY 2L, cycle 2611: 030–196 / 197–029.
+    # Leave a margin around the chart split for bearing and handoff uncertainty.
+    if 38 <= radial <= 188:
+        return 'approachEast'
+    if radial >= 205 or radial <= 21:
+        return 'approachWest'
+    return 'nashville'
+
+
 def display_identity(row):
     tail=identifier(row.get('r'),24);callsign=identifier(row.get('flight'))
     flags=row.get('dbFlags');military=number(flags) and flags==int(flags) and int(flags)>=0 and bool(int(flags)&1)
@@ -81,9 +182,25 @@ def valid_range(value):
     return number(value) and value == int(value) and 1 <= value <= MAX_RANGE_MILES
 
 EMERGENCY_CODES = ('7500', '7600', '7700')
+API_BASE = 'https://opendata.adsb.fi/api'
 
 
-def nearest(data,home,now,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_codes=EMERGENCY_CODES):
+def alert_priority(candidate):
+    tier = 0 if candidate['emergencySquawk'] else 1 if candidate['watched'] else 2
+    return tier, candidate['distanceMi'], candidate['hex']
+
+
+def wide_alert_queries(watch_tails, squawk_codes, watch_any, squawk_any):
+    if watch_any and watch_tails:
+        tails = ','.join(sorted(watch_tails))
+        yield f'{API_BASE}/v2/registration/{tails}', watch_tails, ()
+    if squawk_any:
+        for code in EMERGENCY_CODES:
+            if code in squawk_codes:
+                yield f'{API_BASE}/v2/sqk/{code}', (), (code,)
+
+
+def nearest(data,home,now,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_codes=EMERGENCY_CODES,*,alerts_only=False):
     if not valid_range(range_miles):raise ValueError("range")
     if not isinstance(data,dict) or not isinstance(data.get('ac'),list) or len(data['ac'])>5000:
         raise ValueError('schema')
@@ -114,7 +231,7 @@ def nearest(data,home,now,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_
         if altitude is None and row.get('on_ground') is not False:
             counts['invalidRejected']+=1;continue
         metres,bearing,direction=distance_bearing(home['latitude'],home['longitude'],lat,lon)
-        if metres>range_miles*1609.344:continue
+        if not alerts_only and metres>range_miles*1609.344:continue
         seen.add(code.lower());counts['eligible']+=1
         display,kind,military,flight=display_identity(dict(row,hex=code.lower()))
         tail=identifier(row.get('r'),24);callsign=identifier(row.get('flight'))
@@ -126,17 +243,14 @@ def nearest(data,home,now,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_
         if emergency not in squawk_codes:
             emergency = ''
         watched=bool(tail and tail in watch_tails)
+        if alerts_only and not (watched or emergency):continue
         candidates.append({'emergencySquawk':emergency,'watched':watched,'hex':code.lower(),'displayId':display,'idKind':kind,'tail':tail,'callsign':callsign,
             'military':military,'aircraftType':identifier(row.get('t'),12),'altitudeFt':altitude,'altitudeBasis':basis,
             'distanceMi':metres/1609.344,'bearingDeg':bearing,'direction':direction,'positionTime':position_time,
-            'fr24Url':fr24,'adsbxUrl':adsbx,'_distance':metres})
+            'fr24Url':fr24,'adsbxUrl':adsbx, '_radio':(lat,lon,baro,row.get('track'),row.get('baro_rate'))})
     if not candidates:return None,counts
-    def priority(candidate):
-        tier = 0 if candidate['emergencySquawk'] else 1 if candidate['watched'] else 2
-        return tier, candidate['_distance'], candidate['hex']
-
-    result = min(candidates, key=priority)
-    del result['_distance']
+    result = min(candidates, key=alert_priority)
+    result['atcHint'] = atc_hint(*result.pop('_radio'))
     return result,counts
 
 def private_directory(directory):
@@ -200,6 +314,7 @@ def control(directory,payload):
             circuit=read_local(directory/'circuit.json',{})
             if isinstance(circuit,dict):
                 circuit['blocked']=False;circuit['failures']=0
+                circuit.pop('wideRetryAt', None)
                 write_local(directory/'circuit.json',circuit)
     else:raise ValueError('location_required')
     write_local(path,config)
@@ -211,7 +326,7 @@ def query_url(home,range_miles=DEFAULT_RANGE_MILES):
     lat,lon=round(home['latitude'],1),round(home['longitude'],1)
     offset=distance_bearing(home['latitude'],home['longitude'],lat,lon)[0]/1852
     radius=math.ceil(range_miles*1609.344/1852+offset)+1
-    return f'https://opendata.adsb.fi/api/v3/lat/{lat:.1f}/lon/{lon:.1f}/dist/{radius}'
+    return f'{API_BASE}/v3/lat/{lat:.1f}/lon/{lon:.1f}/dist/{radius}'
 
 class FeedError(Exception):
     def __init__(self,code,retry_after=0):self.code=code;self.retry_after=retry_after
@@ -220,7 +335,7 @@ def request_stop(_signal, _frame):
     global stopping
     stopping = True
 
-def read_curl(command, shell_parent=None):
+def read_curl(command, shell_parent=None, request_config=None):
     worker_pid = os.getpid()
     libc = ctypes.CDLL(None, use_errno=True)
 
@@ -234,12 +349,15 @@ def read_curl(command, shell_parent=None):
 
     deadline = time.monotonic() + 10
     child = subprocess.Popen(
-        command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        command, stdin=subprocess.PIPE if request_config is not None else subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, preexec_fn=arm_parent_death,
     )
     output = bytearray()
     body_start = None
     try:
+        if request_config is not None:
+            with child.stdin:
+                child.stdin.write(request_config)
         with selectors.DefaultSelector() as selector:
             selector.register(child.stdout, selectors.EVENT_READ)
             while True:
@@ -281,10 +399,17 @@ def read_curl(command, shell_parent=None):
             child.wait(timeout=1)
 
 def fetch(home,range_miles=DEFAULT_RANGE_MILES,shell_parent=None):
-    command=['curl','-q','--silent','--include','--suppress-connect-headers','--max-time','8',
+    return fetch_url(query_url(home,range_miles), shell_parent)
+
+
+def fetch_url(url, shell_parent, timeout='8'):
+    command=['curl','-q','--silent','--include','--suppress-connect-headers','--max-time',timeout,
         '--connect-timeout','5','--max-filesize',str(MAX_BODY),'--max-redirs','0',
-        '--user-agent','NearestAircraft/0.1 personal Omarchy bar widget',query_url(home,range_miles)]
-    try:response=read_curl(command,shell_parent)
+        '--user-agent','NearestAircraft/0.1 personal Omarchy bar widget',
+        '--config','-']
+    # Keep registrations out of process arguments, even for coverage-wide requests.
+    request_config = f'url = "{url}"\n'.encode('ascii')
+    try:response=read_curl(command,shell_parent,request_config)
     except (OSError,subprocess.TimeoutExpired):raise FeedError(0)
     try:
         header,body=response.split(b'\r\n\r\n',1)
@@ -315,7 +440,8 @@ def demo_snapshot(kind='airline', watch_tails=()):
     result,_=nearest({'now':now*1000,'ac':[row]},{'latitude':36.2,'longitude':-86.52},now,watch_tails=watch_tails)
     return dict(state('ok',True),nearest=result,demo=True)
 
-def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_codes=EMERGENCY_CODES):
+def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_codes=EMERGENCY_CODES,
+           *,watch_any=False,squawk_any=False):
     if demo:
         emit(demo_snapshot(watch_tails=watch_tails))
         while True:time.sleep(INTERVAL);emit(demo_snapshot(watch_tails=watch_tails))
@@ -324,6 +450,7 @@ def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),s
     try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:return 3
     parent=os.getppid();last_revision=None;last_state=None;last_fetch=0
+    wide_queries = tuple(wide_alert_queries(watch_tails, squawk_codes, watch_any, squawk_any))
     while not stopping and os.getppid()==parent:
         home=read_local(directory/'home.json')
         revision=home.get('revision') if valid_home(home) else None
@@ -342,9 +469,40 @@ def worker(directory,demo=False,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),s
             last_fetch=time.monotonic();circuit['nextAllowedAt']=time.time()+INTERVAL
             write_local(directory/'circuit.json',circuit)
             try:
-                data=fetch(home,range_miles,parent);candidate,counts=nearest(data,home,time.time(),range_miles,watch_tails,squawk_codes)
+                data=fetch(home,range_miles,parent)
+                candidate,counts=nearest(data,home,time.time(),range_miles,watch_tails,squawk_codes)
                 circuit.update(failures=0,blocked=False)
-                emit(dict(state('ok' if candidate else 'empty',True),nearest=candidate,counts=counts))
+                candidates = [candidate] if candidate else []
+                wide_retry_at = circuit.get('wideRetryAt')
+                wide_unavailable = bool(wide_queries and number(wide_retry_at) and time.time() < wide_retry_at)
+                if wide_queries and not wide_unavailable:
+                    for url, tails, codes in wide_queries:
+                        time.sleep(1.05)
+                        if stopping or os.getppid() != parent:
+                            return 0
+                        request_budget = time.time() + 1.1
+                        if request_budget > circuit['nextAllowedAt']:
+                            circuit['nextAllowedAt'] = request_budget
+                            write_local(directory/'circuit.json',circuit)
+                        try:
+                            data = fetch_url(url, parent, timeout='2')
+                            match, _ = nearest(data, home, time.time(), range_miles, tails, codes, alerts_only=True)
+                            if match:
+                                candidates.append(match)
+                        except (FeedError, ValueError) as error:
+                            wide_unavailable = True
+                            delay = max(30, error.retry_after) if isinstance(error, FeedError) else 30
+                            circuit['wideRetryAt'] = time.time() + delay
+                            if isinstance(error, FeedError) and error.code == 429:
+                                circuit['nextAllowedAt'] = max(circuit['nextAllowedAt'], circuit['wideRetryAt'])
+                            if isinstance(error, FeedError) and 400 <= error.code < 500:
+                                break
+                    circuit['nextAllowedAt'] = max(circuit['nextAllowedAt'], time.time() + 1.05)
+                now = time.time()
+                candidate = min((item for item in candidates if now - item['positionTime'] <= MAX_AGE),
+                                key=alert_priority, default=None)
+                emit(dict(state('ok' if candidate else 'empty',True),nearest=candidate,counts=counts,
+                          wideAlertUnavailable=wide_unavailable))
             except (FeedError,ValueError) as error:
                 failures=min(3,int(circuit.get('failures',0))+1)
                 status=error.code if isinstance(error,FeedError) else -1
@@ -368,6 +526,8 @@ def main():
     parser.add_argument('--kind',choices=['airline','ga','military'],default='airline')
     parser.add_argument('--watch-stdin',action='store_true',help='read one watchlist line from stdin at worker startup')
     parser.add_argument('--squawk-codes',default=','.join(EMERGENCY_CODES))
+    parser.add_argument('--watch-any-range',action='store_true')
+    parser.add_argument('--squawk-any-range',action='store_true')
     args=parser.parse_args()
     squawk_codes=set(args.squawk_codes.split(',')) & set(EMERGENCY_CODES)
     if args.command=='demo':emit(demo_snapshot(args.kind));return 0
@@ -393,7 +553,8 @@ def main():
             if len(line) > MAX_WATCH_LIST + 1 or not line.endswith(b'\n'):
                 raise ValueError('invalid_watchlist')
             watch_tails = {tail for token in line[:-1].decode('ascii').split(',') if (tail := identifier(token,24))}
-        return worker(args.state_dir,args.demo,args.range_miles,watch_tails,squawk_codes)
+        return worker(args.state_dir,args.demo,args.range_miles,watch_tails,squawk_codes,
+                      watch_any=args.watch_any_range,squawk_any=args.squawk_any_range)
     except (OSError,ValueError,TypeError,OverflowError):emit(state('error'));return 1
 
 if __name__=='__main__':

@@ -35,6 +35,14 @@ ShellRoot {
  }
  TestCase {
  name:"AircraftClickAndRange"; when:win.visible
+ function capture(item, variable) {
+     var path = Quickshell.env(variable)
+     if (!path) return
+     var saved = false
+     wait(150)
+     verify(item.grabToImage(function(image) { saved = image.saveToFile(path) }))
+     tryVerify(function() { return saved }, 3000)
+ }
  function test_aircraftMouseButtons() {
  try {
  tryVerify(function(){return svc.fresh},5000)
@@ -51,16 +59,62 @@ ShellRoot {
  tryCompare(widget,"opened",true,3000)
  var fr=findChild(widget,"openFr24");verify(fr!==null);verify(fr.visible);verify(fr.enabled)
  var ad=findChild(widget,"openDefaultTracker");verify(ad!==null);verify(ad.visible);verify(ad.enabled)
+ var radio=findChild(widget,"openLiveAtc");verify(radio!==null);verify(radio.visible);verify(radio.enabled)
  var card=findChild(widget,"aircraftCard");verify(card!==null)
- var captured=false
- if(Quickshell.env("NEAREST_TEST_IMAGE")) {
- wait(250)
- verify(card.grabToImage(function(image){image.saveToFile(Quickshell.env("NEAREST_TEST_IMAGE"));captured=true}))
- tryVerify(function(){return captured},3000)
- }
+ var atc=findChild(widget,"atcFrequency");verify(atc!==null);verify(atc.visible)
+ verify(atc.text.includes("Smyrna High"))
+ verify(atc.text.includes("118.875 MHz"))
+ var coverage=findChild(widget,"liveAtcCoverage");verify(coverage!==null);verify(coverage.visible)
+ compare(coverage.text,"No matching LiveATC feed listed")
+ verify(radio.text.includes("Browse Memphis Center feeds"))
+ var demoData = svc.data
+ svc.data = Object.assign({}, demoData, {nearest:Object.assign({}, demoData.nearest, {atcHint:"memphisClarksville"})})
+ verify(atc.text.includes("124.125 MHz"))
+ verify(coverage.visible)
+ svc.data = Object.assign({}, demoData, {nearest:Object.assign({}, demoData.nearest, {atcHint:"memphis"})})
+ verify(atc.text.includes("Sector frequency unknown"))
+ verify(!coverage.visible)
+ svc.data = Object.assign({}, demoData, {nearest:Object.assign({}, demoData.nearest, {atcHint:"approachEast", altitudeFt:6000})})
+ verify(atc.text.includes("118.400 MHz"))
+ verify(!coverage.visible)
+ verify(radio.text.includes("Listen on LiveATC"))
+ capture(card, "NEAREST_TEST_NASHVILLE_IMAGE")
+ svc.data = Object.assign({}, demoData, {nearest:Object.assign({}, demoData.nearest, {atcHint:"nashville"})})
+ verify(atc.text.includes("Nashville (KBNA)"))
+ svc.data = Object.assign({}, demoData, {nearest:Object.assign({}, demoData.nearest, {atcHint:""})})
+ verify(!atc.visible && !radio.visible)
+ svc.data = demoData
+ capture(card, "NEAREST_TEST_IMAGE")
  mouseClick(widget,widget.width/2,widget.height/2,Qt.MiddleButton)
  tryCompare(widget,"settingsMode",true)
  verify(widget.opened)
+ verify(!radio.visible)
+ verify(!coverage.visible)
+ var watchRange=findChild(widget,"watchRange")
+ var squawkRange=findChild(widget,"squawkRange")
+ compare(watchRange.value,"local")
+ compare(squawkRange.value,"local")
+ var distantData = Object.assign({}, svc.data, {nearest:Object.assign({}, svc.aircraft, {distanceMi:400, watched:true, displayId:"N123AB", idKind:"tail", altitudeFt:8000, atcHint:""})})
+ watchRange.changed("any")
+ compare(svc.watchAnyRange,true)
+ compare(svc.squawkAnyRange,false)
+ svc.data=distantData
+ verify(svc.fresh)
+ capture(widget, "NEAREST_TEST_WATCH_IMAGE")
+ capture(card, "NEAREST_TEST_ALERT_SETTINGS_IMAGE")
+ svc.data=Object.assign({}, distantData, {nearest:Object.assign({}, distantData.nearest, {watched:false, emergencySquawk:"7700"})})
+ verify(!svc.fresh)
+ var distantSquawk=svc.data
+ watchRange.changed("local")
+ squawkRange.changed("any")
+ compare(svc.watchAnyRange,false)
+ compare(svc.squawkAnyRange,true)
+ svc.data=distantSquawk
+ verify(svc.fresh)
+ capture(widget, "NEAREST_TEST_SQUAWK_IMAGE")
+ svc.data=distantData
+ verify(!svc.fresh)
+ squawkRange.changed("local")
  var picker=findChild(widget,"defaultTracker")
  verify(picker.visible)
  compare(picker.options.length,4)
@@ -81,10 +135,10 @@ ShellRoot {
  compare(svc.defaultTracker,"adsbx")
  picker.changed("radarbox")
  compare(svc.defaultTracker,"radarbox")
- verify(card.changeTracking("n3200x, N123AB","flightaware"))
- tryCompare(svc,"watchTails","N3200X,N123AB")
+ verify(card.changeTracking("n456zz, N123AB","flightaware"))
+ tryCompare(svc,"watchTails","N456ZZ,N123AB")
  compare(svc.defaultTracker,"flightaware")
- verify(!card.changeTracking("N3200X/","radarbox"))
+ verify(!card.changeTracking("N456ZZ/","radarbox"))
  compare(svc.defaultTracker,"flightaware")
  tryVerify(function(){return svc.fresh && svc.aircraft.watched === true},5000)
  var alert = Object.assign({}, svc.aircraft, {watched:true})
