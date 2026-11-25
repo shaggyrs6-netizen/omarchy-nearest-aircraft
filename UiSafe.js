@@ -55,12 +55,30 @@ function squawkCodes(value) {
     return supported.filter(function(code) { return selected.includes(code) })
 }
 
-function atcHint(value) {
-    return ["nashville", "tower", "approachEast", "approachWest", "memphis", "memphisSmyrna", "memphisClarksville"].includes(value) ? value : ""
+var atcDirectories = {
+    kbna: ["nashville", "tower", "approachEast", "approachWest"],
+    katl: ["atlanta", "atlantaTower", "atlantaTowerNorth", "atlantaFinalNorth", "atlantaApproach", "atlantaDeparture"],
+    zme: ["memphis", "memphisSmyrna", "memphisClarksville"]
 }
 
-function liveAtcUrl(hint) {
-    return ["memphis", "memphisSmyrna", "memphisClarksville"].includes(hint)
-        ? "https://www.liveatc.net/search/?icao=zme"
-        : "https://www.liveatc.net/search/?icao=kbna"
+function liveAtcDirectory(hint, facility) {
+    if (typeof facility === "string") {
+        if (hint === "center" && /^(Z[A-Z]{2}|TJZS)$/.test(facility))
+            return facility.toLowerCase()
+        if (["airport", "airportTower", "airportApproach", "airportDeparture"].includes(hint)
+                && /^[A-Z0-9]{3,4}$/.test(facility))
+            return facility.toLowerCase()
+    }
+    return Object.keys(atcDirectories).find(code => atcDirectories[code].includes(hint)) || ""
+}
+
+function atcHint(value, facility) { return liveAtcDirectory(value, facility) ? value : "" }
+
+function liveAtcUrl(hint, facility) {
+    var directory = liveAtcDirectory(hint, facility)
+    return directory ? "https://www.liveatc.net/search/?icao=" + directory : ""
+}
+
+function liveAtcDirectoryChecked(directory) {
+    return ["kbna", "katl", "kmia", "zma", "zme", "ztl"].includes(directory)
 }

@@ -8,6 +8,30 @@ done
 ln -s "$ROOT" "$PREVIEW/Aircraft"
 cp "$ROOT/tests/gui.qml" "$PREVIEW/shell.qml"
 # The isolated synthetic test never reads home state or polls the feed.
+NEAREST_TEST_ATC_CASES="$(cd "$ROOT" && python3 -B - <<'PY'
+import json
+import time
+import nearest
+
+now = time.time()
+miami = {'latitude': 25.79536, 'longitude': -80.29012}
+
+def sample(lat, lon, altitude, track=None, rate=None, watched=False, home=miami):
+    row = {'hex': 'abc123', 'lat': lat, 'lon': lon, 'alt_baro': altitude, 'seen_pos': 0,
+           'r': 'N123AB', 'flight': 'N123AB', 't': 'C172', 'track': track, 'baro_rate': rate}
+    selected, _ = nearest.nearest({'now': now * 1000, 'ac': [row]}, home, now, 20,
+                                  {'N123AB'} if watched else (), (), alerts_only=watched)
+    return selected
+
+print(json.dumps({
+    'miamiArrival': sample(25.79536, -80.13, 4000, 270, -700),
+    'floridaOverflight': sample(25.9, -80.44, 35000),
+    'distantWatched': sample(33.64954, -84.32, 3200, 270, -700, watched=True),
+    'uncheckedCenter': sample(32.70, -117.20, 35000, home={'latitude': 32.70, 'longitude': -117.20}),
+}))
+PY
+)"
+export NEAREST_TEST_ATC_CASES
 qs --path "$PREVIEW/shell.qml" > "$PREVIEW/result.log" 2>&1
 cat "$PREVIEW/result.log"
 rg -q 'REGRESSION PASS:' "$PREVIEW/result.log"

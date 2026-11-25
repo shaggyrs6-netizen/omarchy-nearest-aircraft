@@ -35,7 +35,10 @@ ColumnLayout {
     readonly property bool configured: svc && svc.data.configured === true
     readonly property bool fresh: svc && svc.fresh
     readonly property var aircraft: fresh ? svc.aircraft : null
-    readonly property string atcHint: root.aircraft ? Safe.atcHint(root.aircraft.atcHint) : ""
+    readonly property string atcCode: root.aircraft ? Safe.plain(root.aircraft.atcCode, 4) : ""
+    readonly property string atcHint: root.aircraft ? Safe.atcHint(root.aircraft.atcHint, root.aircraft.atcCode) : ""
+    readonly property string liveAtcDirectory: Safe.liveAtcDirectory(root.atcHint, root.aircraft ? root.aircraft.atcCode : "")
+    readonly property bool liveAtcCoverageUnverified: liveAtcDirectory !== "" && !Safe.liveAtcDirectoryChecked(liveAtcDirectory)
     readonly property bool liveAtcFeedUnlisted: atcHint === "memphisSmyrna" || atcHint === "memphisClarksville"
     readonly property bool demo: svc && svc.demo
     readonly property bool showHome: !demo && (editHome || !configured)
@@ -115,15 +118,21 @@ ColumnLayout {
         visible:!root.settingsMode && root.atcHint !== ""
         Layout.fillWidth:true
         objectName:"atcFrequency"
-        text: root.atcHint ? strings.t("atc." + root.atcHint) : ""
+        text: {
+            if (!root.atcHint) return ""
+            var label = strings.t("atc." + root.atcHint)
+            if (!label.includes("%1")) return label
+            var facility = Safe.plain(root.aircraft.atcName, 64)
+            return label.arg(facility ? facility + " (" + root.atcCode + ")" : root.atcCode)
+        }
         font.pixelSize:Style.font.bodySmall
         opacity:.72
     }
     PlainText {
         objectName:"liveAtcCoverage"
-        visible:!root.settingsMode && root.liveAtcFeedUnlisted
+        visible:!root.settingsMode && (root.liveAtcFeedUnlisted || root.liveAtcCoverageUnverified)
         Layout.fillWidth:true
-        text:strings.t("atc.liveatcUnlisted")
+        text:strings.t(root.liveAtcFeedUnlisted ? "atc.liveatcUnlisted" : "atc.liveatcUnverified")
         font.pixelSize:Style.font.bodySmall
         opacity:.72
     }
@@ -131,10 +140,11 @@ ColumnLayout {
         objectName:"openLiveAtc"
         visible:!root.settingsMode && root.atcHint !== ""
         Layout.fillWidth:true
-        text:strings.t(root.liveAtcFeedUnlisted ? "links.liveatcBrowse" : "links.liveatc")
+        text:root.liveAtcCoverageUnverified ? strings.t("links.liveatcCheck")
+            : strings.t("links.liveatc." + root.liveAtcDirectory, strings.t("links.liveatc"))
         bordered:true
         focusable:true
-        onClicked:Qt.openUrlExternally(Safe.liveAtcUrl(root.atcHint))
+        onClicked:if (root.aircraft) Qt.openUrlExternally(Safe.liveAtcUrl(root.atcHint, root.aircraft.atcCode))
     }
     PlainText {
         visible:!root.settingsMode && svc && svc.data.wideAlertUnavailable === true

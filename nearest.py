@@ -5,6 +5,7 @@ import ctypes
 import datetime as dt
 import email.utils
 import fcntl
+from functools import lru_cache
 import json
 import math
 import os
@@ -102,61 +103,143 @@ MEMPHIS_SECTOR_61 = (
 )
 
 
-def inside_sector(lat, lon, outline):
-    # Equirectangular distances around Nashville. Skip positions within
-    # roughly 5 NM of any edge where a communications handoff may differ.
+ATLANTA_NORTH_FINAL = (
+    (33.6495344, -84.4390256, 90),   # 08L threshold, true course
+    (33.6495421, -84.4094539, 270),  # 26R threshold, true course
+)
+
+
+def inside_sector(lat, lon, outline, *, inset=True):
+    lon += 360 * round((outline[0][0] - lon) / 360)
+    # Estimate distance to the boundary locally and leave a 5 NM margin.
+    longitude_scale = math.cos(math.radians(lat))
+    latitude_margin = 0 if inset else 5 / 60
+    longitude_margin = latitude_margin / max(longitude_scale, 0.01)
+    if not (min(point[0] for point in outline) - longitude_margin < lon < max(point[0] for point in outline) + longitude_margin
+            and min(point[1] for point in outline) - latitude_margin < lat < max(point[1] for point in outline) + latitude_margin):
+        return False
     inside = False
     for (lon_a, lat_a), (lon_b, lat_b) in zip(outline, outline[1:]):
         if (lat_a > lat) != (lat_b > lat):
             crossing = lon_a + (lon_b - lon_a) * (lat - lat_a) / (lat_b - lat_a)
             if lon < crossing:
                 inside = not inside
-        x, y = (lon_a - lon) * 0.81, lat_a - lat
-        dx, dy = (lon_b - lon_a) * 0.81, lat_b - lat_a
-        along = max(0, min(1, -(x * dx + y * dy) / (dx * dx + dy * dy)))
+        x, y = (lon_a - lon) * longitude_scale, lat_a - lat
+        dx, dy = (lon_b - lon_a) * longitude_scale, lat_b - lat_a
+        length_squared = dx * dx + dy * dy
+        along = max(0, min(1, -(x * dx + y * dy) / length_squared)) if length_squared else 0
         if math.hypot(x + along * dx, y + along * dy) <= 5 / 60:
-            return False
+            return not inset
     return inside
 
 
-def atc_hint(lat, lon, baro, track, vertical_rate):
-    # A local listening heuristic, not a sector map. The 30 NM circle around
-    # KBNA is inside the FAA's 29 Oct 2026 Memphis high-center boundary.
-    # FAA Airspace Boundary service: IDENT=ZME, LEVEL_=U.
-    distance, radial, _ = distance_bearing(36.1263, -86.6782, lat, lon)
-    nautical_miles = distance / 1852
-    if nautical_miles > 30:
-        return ''
-    if not number(baro):
-        return 'nashville'
-    if 20000 <= baro <= 60000:
-        # Use interior flight levels, leaving room around both published
-        # altitude transitions and differences between source datasets.
-        if 25000 <= baro <= 33500 and inside_sector(lat, lon, MEMPHIS_SECTOR_62):
-            return 'memphisSmyrna'
-        if baro >= 36000 and inside_sector(lat, lon, MEMPHIS_SECTOR_61):
-            return 'memphisClarksville'
-        return 'memphis'
-    if not (number(track) and 0 <= track < 360 and number(vertical_rate) and 300 <= abs(vertical_rate) <= 8000):
-        return 'nashville'
+def track_difference(track, course):
+    return abs((track - course + 180) % 360 - 180)
 
-    _, inbound, _ = distance_bearing(lat, lon, 36.1263, -86.6782)
-    expected_track = inbound if vertical_rate < 0 else (inbound + 180) % 360
-    if abs((track - expected_track + 180) % 360 - 180) > 55:
-        return 'nashville'
 
-    if nautical_miles <= 4 and 750 <= baro <= 1500:
-        return 'tower'
-    if not (5 <= nautical_miles and 2000 <= baro <= 9000):
-        return 'nashville'
+@lru_cache(maxsize=1)
+def atc_data():
+    data = read_local(Path(__file__).with_name('atc_us.json'), {}, max_bytes=2_000_000, allow_root=True)
+    if isinstance(data, dict) and isinstance(data.get('airports'), list) and isinstance(data.get('airspace'), list):
+        return data['airports'], data['airspace']
+    return (), ()
 
-    # FAA KBNA ILS/LOC RWY 2L, cycle 2611: 030–196 / 197–029.
-    # Leave a margin around the chart split for bearing and handoff uncertainty.
-    if 38 <= radial <= 188:
-        return 'approachEast'
-    if radial >= 205 or radial <= 21:
-        return 'approachWest'
-    return 'nashville'
+
+def center_hint(lat, lon, baro):
+    for code, name, rings in atc_data()[1]:
+        if not inside_sector(lat, lon, rings[0]) or any(inside_sector(lat, lon, hole, inset=False) for hole in rings[1:]):
+            continue
+        if code == 'ZME':
+            # Leave room around altitude transitions and sector edges.
+            if 25000 <= baro <= 33500 and inside_sector(lat, lon, MEMPHIS_SECTOR_62):
+                return 'memphisSmyrna', code, name
+            if baro >= 36000 and inside_sector(lat, lon, MEMPHIS_SECTOR_61):
+                return 'memphisClarksville', code, name
+            return 'memphis', code, name
+        return 'center', code, name
+    return '', '', ''
+
+
+def atlanta_terminal_hint(lat, lon, baro, track, vertical_rate, distance_nm):
+    if vertical_rate < 0:
+        for runway_lat, runway_lon, course in ATLANTA_NORTH_FINAL:
+            distance, to_threshold, _ = distance_bearing(lat, lon, runway_lat, runway_lon)
+            threshold_nm = distance / 1852
+            offset = math.radians(track_difference(to_threshold, course))
+            # Keep well inside the parallel runway spacing. Also require the
+            # aircraft to be approaching the threshold along the runway axis.
+            if (track_difference(track, course) <= 12 and offset < math.pi / 2
+                    and threshold_nm * math.sin(offset) <= 0.10):
+                if 0.6 <= threshold_nm <= 1.7 and 1100 <= baro <= 1750:
+                    return 'atlantaTowerNorth'
+                if 3.5 <= threshold_nm <= 10 and 1900 <= baro <= 4500:
+                    return 'atlantaFinalNorth'
+    if distance_nm <= 4 and 1050 <= baro <= 1800:
+        return 'atlantaTower'
+    if 5 <= distance_nm <= 24 and 2100 <= baro <= 9000:
+        return 'atlantaApproach' if vertical_rate < 0 else 'atlantaDeparture'
+    return 'atlanta'
+
+
+def terminal_candidates(lat, lon, baro, track, vertical_rate):
+    moving = (number(track) and 0 <= track < 360 and number(vertical_rate)
+              and 300 <= abs(vertical_rate) <= 8000)
+    for code, name, airport_lat, airport_lon, elevation, towered in atc_data()[0]:
+        if abs(airport_lat - lat) > 0.51:
+            continue
+        height = baro - elevation if number(baro) else None
+        if height is not None and not -200 <= height <= 10000:
+            continue
+        distance, radial, _ = distance_bearing(airport_lat, airport_lon, lat, lon)
+        distance_nm = distance / 1852
+        if distance_nm > (30 if towered else 3):
+            continue
+        _, inbound, _ = distance_bearing(lat, lon, airport_lat, airport_lon)
+        angle = track_difference(track, inbound if vertical_rate < 0 else (inbound + 180) % 360) if moving else 55
+        aligned = moving and angle <= 55
+        if distance_nm > (15 if towered else 3) and not aligned:
+            continue
+        if not towered and height is not None and height > 3000:
+            continue
+        if height is None and distance_nm > 5:
+            continue
+        # Prefer a plausible flight path over an airport merely alongside it.
+        score = distance_nm + (angle / 10 if moving else 0) + (0 if towered else 2)
+        yield score, code, name, towered, height, distance_nm, radial, aligned
+
+
+def atc_lookup(lat, lon, baro, track, vertical_rate):
+    if number(baro) and 20000 <= baro <= 60000:
+        return center_hint(lat, lon, baro)
+
+    candidates = sorted(terminal_candidates(lat, lon, baro, track, vertical_rate))
+    if not candidates:
+        return '', '', ''
+    score, code, name, towered, height, distance_nm, radial, aligned = candidates[0]
+    if len(candidates) > 1 and candidates[1][0] - score < 1:
+        return '', '', ''
+
+    hint = 'airport'
+    if towered and aligned and height is not None:
+        if distance_nm <= 4 and height <= 2000:
+            hint = 'airportTower'
+        elif 5 <= distance_nm and height <= 9000:
+            hint = 'airportApproach' if vertical_rate < 0 else 'airportDeparture'
+
+    if code == 'KATL':
+        hint = atlanta_terminal_hint(lat, lon, baro, track, vertical_rate, distance_nm) if aligned and height is not None else 'atlanta'
+    elif code == 'KBNA':
+        hint = 'nashville'
+        if aligned and height is not None:
+            if distance_nm <= 4 and 750 <= baro <= 1500:
+                hint = 'tower'
+            elif 5 <= distance_nm and 2000 <= baro <= 9000:
+                # FAA KBNA ILS/LOC RWY 2L: margin around the printed sector split.
+                if 38 <= radial <= 188:
+                    hint = 'approachEast'
+                elif radial >= 205 or radial <= 21:
+                    hint = 'approachWest'
+    return hint, code, name
 
 
 def display_identity(row):
@@ -250,7 +333,7 @@ def nearest(data,home,now,range_miles=DEFAULT_RANGE_MILES,watch_tails=(),squawk_
             'fr24Url':fr24,'adsbxUrl':adsbx, '_radio':(lat,lon,baro,row.get('track'),row.get('baro_rate'))})
     if not candidates:return None,counts
     result = min(candidates, key=alert_priority)
-    result['atcHint'] = atc_hint(*result.pop('_radio'))
+    result['atcHint'], result['atcCode'], result['atcName'] = atc_lookup(*result.pop('_radio'))
     return result,counts
 
 def private_directory(directory):
@@ -261,24 +344,24 @@ def private_directory(directory):
     directory.chmod(0o700)
     return directory
 
-def read_local(path, default=None):
+def read_local(path, default=None, *, max_bytes=MAX_LOCAL_STATE, allow_root=False):
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            if not stat.S_ISREG(info.st_mode) or (info.st_uid != os.getuid() and not (allow_root and info.st_uid == 0)):
                 return default
-            if info.st_size > MAX_LOCAL_STATE:
+            if info.st_size > max_bytes:
                 return default
             data = bytearray()
-            while len(data) <= MAX_LOCAL_STATE:
-                chunk = os.read(fd, MAX_LOCAL_STATE + 1 - len(data))
+            while len(data) <= max_bytes:
+                chunk = os.read(fd, min(65536, max_bytes + 1 - len(data)))
                 if not chunk:
                     break
                 data.extend(chunk)
         finally:
             os.close(fd)
-        if len(data) > MAX_LOCAL_STATE:
+        if len(data) > max_bytes:
             return default
         return json.loads(data.decode("utf-8"))
     except (OSError, ValueError):

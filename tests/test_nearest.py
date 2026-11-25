@@ -117,7 +117,7 @@ class NearestTests(unittest.TestCase):
             ('approachEast', row(lon=-86.50, track=245, baro_rate=-700)),
             ('approachWest', row(lon=-86.85, track=300, baro_rate=700)),
             ('tower', row(lat=36.155, lon=-86.6782, alt_baro=1050, track=180, baro_rate=-500)),
-            ('nashville', row(lon=-86.50, track=65, baro_rate=-700)),
+            ('airport', row(lon=-86.50, track=65, baro_rate=-700)),
             ('nashville', row(lat=36.25, lon=-86.60, track=205, baro_rate=-700)),
             ('nashville', row(lon=-86.50, track=245, baro_rate=None)),
             ('nashville', row(lon=-86.50, track=245, baro_rate=10**400)),
@@ -128,13 +128,68 @@ class NearestTests(unittest.TestCase):
                 self.assertNotIn('_radio', selected)
 
     def test_memphis_hint_is_limited_to_conservative_local_high_airspace(self):
-        self.assertEqual(n.atc_hint(36.21, -86.52, 33000, None, None), 'memphisSmyrna')
-        self.assertEqual(n.atc_hint(36.21, -86.52, 38000, None, None), 'memphisClarksville')
-        self.assertEqual(n.atc_hint(36.21, -86.52, 35000, None, None), 'memphis')
-        self.assertEqual(n.atc_hint(36.38, -86.90, 33000, None, None), 'memphis')
-        self.assertEqual(n.atc_hint(37.0, -86.52, 33000, None, None), '')
-        self.assertEqual(n.atc_hint(36.21, -86.52, 19000, None, None), 'nashville')
-        self.assertEqual(n.atc_hint(36.21, -86.52, None, None, None), 'nashville')
+        self.assertEqual(n.atc_lookup(36.21, -86.52, 33000, None, None)[0], 'memphisSmyrna')
+        self.assertEqual(n.atc_lookup(36.21, -86.52, 38000, None, None)[0], 'memphisClarksville')
+        self.assertEqual(n.atc_lookup(36.21, -86.52, 35000, None, None)[0], 'memphis')
+        self.assertEqual(n.atc_lookup(36.38, -86.90, 33000, None, None)[0], 'memphis')
+        self.assertEqual(n.atc_lookup(37.0, -86.52, 33000, None, None)[0], 'memphis')
+        self.assertEqual(n.atc_lookup(36.21, -86.52, 19000, None, None)[0], '')
+        self.assertEqual(n.atc_lookup(36.21, -86.52, None, None, None)[0], '')
+
+    def test_atlanta_terminal_uses_runway_alignment_and_falls_back_safely(self):
+        self.assertEqual(n.atc_lookup(33.64954, -84.32, 3200, 270, -700)[0], 'atlantaFinalNorth')
+        self.assertEqual(n.atc_lookup(33.64954, -84.389, 1400, 270, -600)[0], 'atlantaTowerNorth')
+        self.assertEqual(n.atc_lookup(33.64954, -84.55, 3200, 90, -700)[0], 'atlantaFinalNorth')
+        self.assertEqual(n.atc_lookup(33.6472, -84.32, 3200, 270, -700)[0], 'atlantaApproach')
+        self.assertEqual(n.atc_lookup(33.73, -84.21, 5200, 55, 800)[0], 'atlantaDeparture')
+        self.assertEqual(n.atc_lookup(33.64954, -84.32, 3200, 90, -700)[0], '')
+
+    def test_selected_aircraft_location_controls_atc_with_different_saved_homes(self):
+        aircraft = row(lat=33.64954, lon=-84.32, alt_baro=3200, track=270, baro_rate=-700)
+        atlanta_home = {'latitude':33.6367, 'longitude':-84.4279}
+        nearby, _ = n.nearest(feed(aircraft), atlanta_home, NOW, 20)
+        outside, _ = n.nearest(feed(aircraft), HOME, NOW, 20)
+        watched, _ = n.nearest(feed(aircraft), HOME, NOW, 20, {'N123AB'}, (), alerts_only=True)
+        self.assertIsNone(outside)
+        self.assertLess(nearby['distanceMi'], 20)
+        self.assertGreater(watched['distanceMi'], 200)
+        self.assertEqual(nearby['atcHint'], 'atlantaFinalNorth')
+        self.assertEqual(watched['atcHint'], nearby['atcHint'])
+
+    def test_miami_arrival_uses_the_airport_and_south_florida_cruise_uses_center(self):
+        miami = {'latitude':25.79536, 'longitude':-80.29012}
+        arrival = row(lat=25.79536, lon=-80.13, alt_baro=4000, track=270, baro_rate=-700)
+        overflight = row(lat=25.9, lon=-80.44, alt_baro=35000)
+        for aircraft, expected in ((arrival, ('airportApproach', 'KMIA')), (overflight, ('center', 'ZMA'))):
+            with self.subTest(expected=expected):
+                selected, _ = n.nearest(feed(aircraft), miami, NOW, 20)
+                self.assertEqual((selected['atcHint'], selected['atcCode']), expected)
+        distant = row(lat=33.64954, lon=-84.32, alt_baro=3200, track=270, baro_rate=-700)
+        selected, _ = n.nearest(feed(distant), miami, NOW, 20, {'N123AB'}, (), alerts_only=True)
+        self.assertTrue(selected['watched'])
+        self.assertGreater(selected['distanceMi'], 500)
+        self.assertEqual((selected['atcHint'], selected['atcCode']), ('atlantaFinalNorth', 'KATL'))
+
+    def test_nationwide_snapshot_supports_noncontiguous_regions(self):
+        airport_rows, airspace_rows = n.atc_data()
+        self.assertGreater(len(airport_rows), 4000)
+        self.assertEqual(len({code for code, _, _ in airspace_rows}), 23)
+        for lat, lon, track, airport, center in (
+                (61.17, -150.3, 90, 'PANC', 'ZAN'),
+                (21.32, -157.74, 270, 'PHNL', 'ZHN')):
+            with self.subTest(airport=airport):
+                self.assertEqual(n.atc_lookup(lat, lon, 4000, track, -700)[:2], ('airportApproach', airport))
+                self.assertEqual(n.atc_lookup(lat, lon, 35000, None, None)[:2], ('center', center))
+        self.assertEqual(n.atc_lookup(18.43, -66, 35000, None, None)[:2], ('center', 'TJZS'))
+
+    def test_center_lookup_extends_beyond_the_terminal_area_and_avoids_edges(self):
+        self.assertEqual(n.atc_lookup(34.95, -84.90, 35000, None, None)[:2], ('center', 'ZTL'))
+        self.assertEqual(n.atc_lookup(35.16, -89.99, 34000, None, None)[0], 'memphis')
+        rings = next(rings for code, _, rings in n.atc_data()[1] if code == 'ZTL')
+        boundary_lon, boundary_lat = rings[0][0]
+        self.assertEqual(n.atc_lookup(boundary_lat, boundary_lon, 35000, None, None)[0], '')
+        self.assertEqual(n.atc_lookup(32.70, -117.20, 35000, None, None)[:2], ('center', 'ZLA'))
+        self.assertEqual(n.atc_lookup(52, 0, 35000, None, None), ('', '', ''))
 
     def test_tracking_links_are_public_pages(self):
         a,_=n.nearest(feed(row()),HOME,NOW)

@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Refresh the bundled U.S. airport and upper airspace snapshot from the FAA."""
+import json
+from pathlib import Path
+import re
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
+AIRPORTS = 'https://services.arcgis.com/xOi1kZaI0eWDREZv/ArcGIS/rest/services/NTAD_Aviation_Facilities/FeatureServer/0/query'
+AIRSPACE = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Boundary_Airspace/FeatureServer/0/query'
+
+
+def query(source, **params):
+    with urlopen(source + '?' + urlencode(params), timeout=30) as response:
+        data = json.load(response)
+    if 'error' in data:
+        raise RuntimeError(data['error'])
+    return data
+
+
+def airports():
+    fields = 'ARPT_ID,ICAO_ID,ARPT_NAME,LAT_DECIMAL,LONG_DECIMAL,ELEV,TWR_TYPE_CODE,EFF_DATE'
+    where = "COUNTRY_CODE='US' AND SITE_TYPE_CODE='A' AND FACILITY_USE_CODE='PU' AND ARPT_STATUS='O'"
+    result = {}
+    dates = set()
+    offset = 0
+    while True:
+        page = query(AIRPORTS, f='json', where=where, outFields=fields, returnGeometry='false',
+                     orderByFields='OBJECTID', resultOffset=offset, resultRecordCount=1000)
+        entries = page['features']
+        for feature in entries:
+            row = feature['attributes']
+            code = row['ICAO_ID'] or row['ARPT_ID']
+            lat, lon, elevation = (row[field] for field in ('LAT_DECIMAL','LONG_DECIMAL','ELEV'))
+            if not code or not re.fullmatch(r'[A-Z0-9]{3,4}', code) or None in (lat, lon, elevation):
+                continue
+            dates.add(row['EFF_DATE'])
+            tower = (row['TWR_TYPE_CODE'] or '').startswith('ATCT')
+            result[code] = [code, row['ARPT_NAME'].title(), round(lat,5), round(lon,5), round(elevation), int(tower)]
+        if not page.get('exceededTransferLimit'):
+            break
+        if not entries:
+            raise RuntimeError('Airport pagination stopped unexpectedly')
+        offset += len(entries)
+    if len(result) < 4000 or len(dates) != 1:
+        raise RuntimeError(f'Unexpected FAA airport snapshot: {len(result)} airports, {dates}')
+    return sorted(result.values()), dates.pop()
+
+
+def unwrap(ring):
+    result = []
+    for lon, lat in ring:
+        if result:
+            lon += 360 * round((result[-1][0] - lon) / 360)
+        result.append([round(lon,4), round(lat,4)])
+    if len(result) < 4 or result[0] != result[-1]:
+        raise RuntimeError('The FAA returned a ring that could not be closed')
+    return result
+
+
+def airspace():
+    where = "(TYPE_CODE='ARTCC' AND LEVEL_='U') OR (TYPE_CODE='CTA' AND IDENT IN ('ZHN','TJZS'))"
+    params = dict(where=where, outFields='IDENT,NAME', outSR=4326, geometryPrecision=4, f='geojson')
+    output = []
+    for feature in query(AIRSPACE, **params)['features']:
+        code = feature['properties']['IDENT']
+        name = {'ZHN': 'Honolulu Control Facility', 'TJZS': 'San Juan Control Facility'}.get(
+            code, feature['properties']['NAME'].title() + ' Center')
+        geometry = feature['geometry']
+        polygons = [geometry['coordinates']] if geometry['type'] == 'Polygon' else geometry['coordinates']
+        output.extend([code, name, [unwrap(ring) for ring in polygon]] for polygon in polygons)
+    if len({entry[0] for entry in output}) != 23:
+        raise RuntimeError('Unexpected number of FAA upper facilities')
+    return sorted(output)
+
+
+if __name__ == '__main__':
+    airports_data, airport_cycle = airports()
+    sections = {'airportCycle': airport_cycle, 'airports': airports_data, 'airspace': airspace()}
+    target = Path(__file__).resolve().parent.parent / 'atc_us.json'
+    with target.open('w', encoding='utf-8') as output:
+        output.write('{"airportCycle":' + json.dumps(airport_cycle))
+        for key in ('airports', 'airspace'):
+            rows = ',\n'.join(json.dumps(row, separators=(',', ':')) for row in sections[key])
+            output.write(f',\n"{key}":[\n{rows}\n]')
+        output.write('\n}\n')

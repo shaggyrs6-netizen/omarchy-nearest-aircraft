@@ -1,6 +1,6 @@
 # Nearest Aircraft
 
-![Nearest Aircraft — LiveATC and flexible alert ranges. Promotional artwork.](preview-v0.2.0.png)
+![Nearest Aircraft — Nationwide U.S. LiveATC. Promotional artwork.](preview-v0.2.1.png)
 
 A compact Omarchy bar widget showing the nearest **reported airborne aircraft** to a location you set locally.
 
@@ -10,13 +10,15 @@ A compact Omarchy bar widget showing the nearest **reported airborne aircraft** 
 - Search range from **1 to 100 statute miles**, default 70 miles.
 - Airline flight numbers where reliably derivable, such as `BAW232 → BA232`; registrations preferred for GA and provider-flagged military aircraft.
 - Red emergency squawk alerts, an orange tail-number watchlist and a selectable tracker that opens in your default browser.
-- Separate range controls for watched tails and emergency squawks, plus LiveATC links for the Nashville area.
+- Separate range controls for watched tails and emergency squawks, plus an aircraft-based U.S. LiveATC directory lookup.
 - Theme-aware compact readout, local home settings, pause/resume and demonstration mode.
 - Live aircraft data from [ADSB.fi](https://adsb.fi/), refreshed every ten seconds while configured and enabled.
 
 ## Screenshots
 
 Captured in demo mode with synthetic aircraft.
+
+[Miami arrival](screenshots/miami-arrival.png) · [South Florida overflight](screenshots/south-florida-overflight.png) · [Distant watched aircraft](screenshots/distant-watched-aircraft.png) · [Release notes](release-notes.md)
 
 | Emergency squawk | Watched registration |
 | --- | --- |
@@ -86,9 +88,11 @@ The **Default tracker** menu saves your choice between ADS-B Exchange, Flightrad
 
 ## Listen on LiveATC
 
-For aircraft near Nashville, right-click the widget for a LiveATC shortcut. The popup can suggest a likely Tower, Approach/Departure or Memphis Center frequency based on the aircraft's reported position, altitude and flight path. When the Memphis sector match is uncertain, the popup keeps the general Center link and leaves the frequency unknown.
+Right-click the widget for a LiveATC shortcut when it can match the displayed aircraft to a U.S. airport or Center. Your saved location is used to measure distance and apply your search radius. The displayed aircraft's position, altitude and flight path determine the ATC suggestion, including for distant Any-range alerts.
 
-The button opens a [Nashville](https://www.liveatc.net/search/?icao=kbna) or [Memphis Center](https://www.liveatc.net/search/?icao=zme) directory page in your browser. The Smyrna High and Clarksville Ultra High coverage notes reflect a manual feed-directory check. Controller assignments can differ from the estimates, and a live Memphis handoff has not been verified.
+- **Airports:** The bundled FAA data covers public-use airports across all 50 states. The popup can suggest an airport, tower, approach or departure directory. It uses airport elevation, distance and track and withholds the shortcut when nearby airport matches are too close to call. Selected Nashville and Atlanta cases show specific frequency estimates. [FAA airport data](https://catalog.data.gov/dataset/aviation-facilities)
+- **Centers:** High-altitude reports well inside the bundled FAA upper airspace boundaries get a Center directory. The two Memphis sector estimates remain available. Other Center matches leave the sector frequency unknown. [FAA airspace boundaries](https://www.arcgis.com/home/item.html?id=67885972e4e940b2aa6d74024901c561)
+- **LiveATC coverage:** The button opens the provider’s public directory. If the directory hasn’t been manually checked, the popup says **LiveATC feed availability unverified**. The two Memphis no-feed notes reflect a manual check of those exact frequencies. Controller assignments and feed availability can change. [LiveATC feed directory](https://www.liveatc.net/feedindex.php)
 
 ## Pause, disable or remove
 
@@ -146,6 +150,8 @@ omarchy-shell shaggyrs6.nearest-aircraft.service status
 ```
 
 The first command runs Python selection/privacy/range tests, UI safety checks and Omarchy manifest validation. The second launches an isolated synthetic Qt interaction test for the bar click, browser-button availability and range callback. It does not read your home or poll aircraft data.
+
+The ATC lookup uses a bundled FAA snapshot at runtime. Maintainers can refresh it with `./bin/update-atc-data`, review the resulting `atc_us.json`, and run both checks again. The refresh command contacts the FAA data services.
 
 ## Licence and attribution
 

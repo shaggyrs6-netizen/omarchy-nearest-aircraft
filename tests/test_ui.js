@@ -39,4 +39,16 @@ for (const hint of ['memphis', 'memphisSmyrna', 'memphisClarksville']) {
   assert.equal(ui.liveAtcUrl(hint), 'https://www.liveatc.net/search/?icao=zme');
 }
 assert.equal(ui.liveAtcUrl('approachEast'), 'https://www.liveatc.net/search/?icao=kbna');
-assert.equal(ui.liveAtcUrl(undefined), 'https://www.liveatc.net/search/?icao=kbna');
+assert.equal(ui.liveAtcUrl('atlantaFinalNorth'), 'https://www.liveatc.net/search/?icao=katl');
+assert.equal(ui.liveAtcUrl('center', 'ZTL'), 'https://www.liveatc.net/search/?icao=ztl');
+assert.equal(ui.liveAtcUrl('airportApproach', 'KMIA'), 'https://www.liveatc.net/search/?icao=kmia');
+assert.equal(ui.liveAtcUrl('center', 'ZMA'), 'https://www.liveatc.net/search/?icao=zma');
+assert.equal(ui.liveAtcUrl('airport', '7FL'), 'https://www.liveatc.net/search/?icao=7fl');
+assert.equal(ui.liveAtcUrl('center', 'TJZS'), 'https://www.liveatc.net/search/?icao=tjzs');
+assert.equal(ui.liveAtcUrl('center', 'KMIA'), '');
+assert.equal(ui.liveAtcUrl('airport', 'KATL&x=1'), '');
+assert.equal(ui.liveAtcUrl('airportApproach', ['KMIA']), '');
+assert.equal(ui.liveAtcDirectoryChecked('kmia'), true);
+assert.equal(ui.liveAtcDirectoryChecked('ksea'), false);
+assert.equal(ui.liveAtcUrl(undefined), '');
+assert.equal(ui.liveAtcUrl('https://example.com'), '');
