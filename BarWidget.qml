@@ -8,6 +8,7 @@ import "UiSafe.js" as Safe
 BarWidget {
     id: root
     moduleName: "shaggyrs6.nearest-aircraft"
+    settings: null // Omarchy supplies settings after attaching the bar.
     property bool settingsMode: false
     property var anchorItem: button
     readonly property var svc: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
@@ -15,7 +16,14 @@ BarWidget {
     readonly property var aircraft: fresh ? svc.aircraft : null
     readonly property color foreground: bar ? bar.barForeground : Commons.Color.foreground
     Translations { id:strings; directory:Qt.resolvedUrl("i18n") }
-    Binding { target:root.svc; property:"settings"; value:root.settings; when:root.svc !== null }
+    Binding {
+        target: root.svc
+        property: "settings"
+        value: root.settings
+        when: root.svc !== null && root.settings !== null
+        // Keep the last settings while Omarchy recreates the bar widget.
+        restoreMode: Binding.RestoreNone
+    }
 
     readonly property string alertLabel: !aircraft ? "" : aircraft.emergencySquawk
         ? strings.t("alerts.squawk").arg(aircraft.emergencySquawk) : aircraft.watched ? strings.t("alerts.watched") : ""

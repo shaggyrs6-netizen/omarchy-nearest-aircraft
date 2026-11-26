@@ -20,13 +20,14 @@ Item {
     readonly property string activeSquawkCodes: squawkEnabled ? squawkCodes.join(",") : ""
     property bool intentionalRestart: false
     property bool ready: false
+    property var readerOptions: []
+    property string readerWatchTails: ""
     Component.onCompleted: {
         root.ready = true
-        if (root.settings !== null) root.restartReader()
+        root.syncReaderSettings()
     }
     onSettingsChanged: {
-        if (root.ready && root.settings !== null && !reader.running && !restartTimer.running)
-            root.restartReader()
+        if (root.ready) settingsTimer.restart()
     }
     readonly property bool demo: settings !== null && settings.demoMode === true
     readonly property var extraArguments: stateDirectory ? ["--state-dir", stateDirectory] : []
@@ -73,32 +74,37 @@ Item {
         if (!Safe.validLink(url, provider)) return false
         return Qt.openUrlExternally(url)
     }
+    function syncReaderSettings() {
+        if (root.settings === null) return
+        var options = ["--range-miles", String(root.rangeMiles), "--watch-stdin", "--squawk-codes=" + root.activeSquawkCodes]
+            .concat(root.watchAnyRange ? ["--watch-any-range"] : [])
+            .concat(root.squawkAnyRange ? ["--squawk-any-range"] : [])
+            .concat(root.extraArguments).concat(root.demo ? ["--demo"] : [])
+        if (root.readerWatchTails === root.watchTails && JSON.stringify(root.readerOptions) === JSON.stringify(options))
+            return
+        root.readerOptions = options
+        root.readerWatchTails = root.watchTails
+        root.restartReader()
+    }
     function restartReader() {
-        if (root.shuttingDown || !root.ready || root.settings === null) return
+        if (root.shuttingDown || !root.ready || root.readerOptions.length === 0) return
         root.data = {state:"loading", configured:root.data.configured === true, nearest:null}
         root.crashCount = 0
         if (reader.running) { root.intentionalRestart = true; reader.running = false }
         restartTimer.restart()
     }
-    onDemoChanged: restartReader()
-    onRangeMilesChanged: restartReader()
-    onWatchTailsChanged: restartReader()
-    onWatchAnyRangeChanged: restartReader()
-    onSquawkAnyRangeChanged: restartReader()
-    onActiveSquawkCodesChanged: restartReader()
     Component.onDestruction: { root.shuttingDown = true; reader.running = false; controller.running = false }
 
     Timer { interval:1000; repeat:true; running:true; onTriggered:root.now = Date.now()/1000 }
-    Timer { id:restartTimer; interval:1000; onTriggered:if (!root.shuttingDown && root.settings !== null && !reader.running && root.crashCount<3) reader.running=true }
+    // A rescan may rebind the widget settings several times as the bar rebuilds.
+    Timer { id:settingsTimer; interval:150; onTriggered:root.syncReaderSettings() }
+    Timer { id:restartTimer; interval:1000; onTriggered:if (!root.shuttingDown && !reader.running && root.crashCount<3) reader.running=true }
     Timer { id:controlDeadline; interval:5000; onTriggered:if (controller.running) controller.running=false }
     Process {
         id: reader
         stdinEnabled: true
-        onStarted: reader.write(root.watchTails + "\n")
-        command: ["python3", "-B", root.helper, "worker", "--range-miles", String(root.rangeMiles), "--watch-stdin", "--squawk-codes=" + root.activeSquawkCodes]
-            .concat(root.watchAnyRange ? ["--watch-any-range"] : [])
-            .concat(root.squawkAnyRange ? ["--squawk-any-range"] : [])
-            .concat(root.extraArguments).concat(root.demo ? ["--demo"] : [])
+        onStarted: reader.write(root.readerWatchTails + "\n")
+        command: ["python3", "-B", root.helper, "worker"].concat(root.readerOptions)
         running: false
         stdout: SplitParser { splitMarker:"\n"; onRead:function(line) { root.apply(line) } }
         onExited: function(code, status) {
